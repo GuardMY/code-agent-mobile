@@ -1,0 +1,76 @@
+{
+  "name": "agent-mobile-control",
+  "displayName": "Agent Mobile 控制",
+  "description": "通过局域网中的 Android 设备控制本地 Codex 会话。",
+  "version": "0.1.0",
+  "publisher": "agent-mobile",
+  "type": "module",
+  "main": "./dist/extension.cjs",
+  "engines": {
+    "vscode": "^1.92.0"
+  },
+  "activationEvents": [
+    "onView:agentMobile.pairingView",
+    "onCommand:agentMobile.startHost"
+  ],
+  "contributes": {
+    "commands": [
+      { "command": "agentMobile.startHost", "title": "Agent Mobile: 启动主机" },
+      { "command": "agentMobile.stopHost", "title": "Agent Mobile: 停止主机" },
+      { "command": "agentMobile.enableLanPairing", "title": "Agent Mobile: 启用局域网配对" },
+      { "command": "agentMobile.disableLanPairing", "title": "Agent Mobile: 停用局域网配对" },
+      { "command": "agentMobile.copyPairingJson", "title": "Agent Mobile: 复制配对 JSON" }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agentMobile",
+          "title": "Agent Mobile",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "agentMobile": [
+        {
+          "id": "agentMobile.pairingView",
+          "name": "配对",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Agent Mobile",
+      "properties": {
+        "agentMobile.port": {
+          "type": "number",
+          "default": 17365
+        },
+        "agentMobile.codexCommand": {
+          "type": "string",
+          "default": "codex"
+        },
+        "agentMobile.eventCacheSize": {
+          "type": "number",
+          "default": 500
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "test": "vitest run",
+    "package": "npm run build && vsce package --no-dependencies --allow-missing-repository",
+    "package:vsix": "npm run package"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.5",
+    "@types/vscode": "^1.92.0",
+    "@vscode/vsce": "^3.6.2",
+    "esbuild": "^0.25.9",
+    "vitest": "^3.2.4"
+  }
+}

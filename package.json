@@ -1,0 +1,25 @@
+{
+  "name": "code-agent-mobile",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "protocol",
+    "agent-host",
+    "gateway",
+    "vscode-extension"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "dev:host": "npm run dev -w @agent-mobile/agent-host",
+    "dev:gateway": "npm run dev -w @agent-mobile/gateway",
+    "package:extension": "npm run package -w vscode-extension"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.10",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

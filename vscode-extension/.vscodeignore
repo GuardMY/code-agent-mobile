@@ -1,0 +1,11 @@
+src/**
+scripts/**
+*.test.ts
+vitest.config.ts
+tsconfig.json
+node_modules/**
+*.tgz
+*.vsix
+dist/**/*.map
+dist/**/*.test.js
+dist/**/*.test.js.map

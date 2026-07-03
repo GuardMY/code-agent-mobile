@@ -1,0 +1,423 @@
+import { describe, expect, it, vi } from "vitest";
+import type { ApprovalRequest, DeviceSummary, SessionSummary } from "@agent-mobile/protocol";
+import { buildServer } from "./server.js";
+import { SessionManager, type AgentAdapter, type SessionStorage } from "./sessions/sessionManager.js";
+
+const adapter: AgentAdapter = {
+  id: "codex",
+  displayName: "Codex",
+  start: async () => ({
+    sendInput: () => undefined,
+    stop: async () => 0
+  })
+};
+
+function createTestContext(input: { pairingExpiresAt?: Date; storage?: SessionStorage; accessTokenTtlMs?: number } = {}) {
+  const manager = new SessionManager({ adapter, eventCacheSize: 10, workspace: "E:/repo", storage: input.storage });
+  const app = buildServer({
+    manager,
+    version: "0.1.0",
+    lanEnabled: true,
+    pairingToken: "pairing-token-123",
+    pairingExpiresAt: input.pairingExpiresAt ?? new Date(Date.now() + 300_000),
+    deviceName: "devbox",
+    accessTokenTtlMs: input.accessTokenTtlMs
+  });
+  return { app, manager };
+}
+
+function createTestServer(input: { pairingExpiresAt?: Date; storage?: SessionStorage; accessTokenTtlMs?: number } = {}) {
+  return createTestContext(input).app;
+}
+
+async function pair(app: ReturnType<typeof createTestServer>): Promise<string> {
+  const response = await app.inject({
+    method: "POST",
+    url: "/pair",
+    payload: { pairingToken: "pairing-token-123", deviceId: "android_1" }
+  });
+  return response.json().accessToken;
+}
+
+describe("agent host server", () => {
+  it("reports health without authentication", async () => {
+    const app = createTestServer({ accessTokenTtlMs: 1 });
+
+    const response = await app.inject({ method: "GET", url: "/health" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ ok: true, version: "0.1.0", lanEnabled: true });
+  });
+
+  it("rejects unauthenticated session list requests", async () => {
+    const app = createTestServer();
+
+    const response = await app.inject({ method: "GET", url: "/sessions" });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("exchanges a valid pairing token for an access token", async () => {
+    const app = createTestServer();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/pair",
+      payload: { pairingToken: "pairing-token-123", deviceId: "android_1" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().accessToken).toMatch(/^access_/);
+  });
+
+  it("rejects an invalid pairing token", async () => {
+    const app = createTestServer();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/pair",
+      payload: { pairingToken: "wrong-token", deviceId: "android_1" }
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("rejects access tokens after they expire", async () => {
+    const app = createTestServer({ accessTokenTtlMs: 0 });
+    const token = await pair(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/sessions",
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("returns conflict when sending input to a restored non-running session", async () => {
+    const restoredSession: SessionSummary = {
+      id: "sess_restored",
+      adapterId: "codex",
+      workspace: "E:/repo",
+      status: "exited",
+      startedAt: "2026-06-30T14:30:00.000Z",
+      lastSeq: 1
+    };
+    const storage: SessionStorage = {
+      loadSessions: async () => [restoredSession],
+      saveSessions: async () => undefined,
+      loadEvents: async () => [],
+      appendEvent: async () => undefined
+    };
+    const { app, manager } = createTestContext({ storage });
+    await manager.loadFromStorage();
+    const token = await pair(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/sessions/sess_restored/input",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { text: "hello" }
+    });
+
+    expect(response.statusCode).toBe(409);
+  });
+
+  it("records paired devices and lists them without access tokens", async () => {
+    const app = createTestServer();
+    const token = await pair(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/devices",
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject([{ deviceId: "android_1", clientType: "android-app" }]);
+    expect(JSON.stringify(response.json())).not.toContain("access_");
+  });
+
+  it("records WeChat mini program clients during pairing", async () => {
+    const app = createTestServer();
+
+    const pairResponse = await app.inject({
+      method: "POST",
+      url: "/pair",
+      payload: {
+        pairingToken: "pairing-token-123",
+        deviceId: "wechat_1",
+        clientType: "wechat-mini-program"
+      }
+    });
+    const token = pairResponse.json().accessToken;
+    const devices = await app.inject({
+      method: "GET",
+      url: "/devices",
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    expect(pairResponse.statusCode).toBe(200);
+    expect(devices.json()).toMatchObject([{ deviceId: "wechat_1", clientType: "wechat-mini-program" }]);
+  });
+
+  it("returns dashboard status with server, pairing, devices, agents, and sessions", async () => {
+    const { app, manager } = createTestContext();
+    const token = await pair(app);
+    await manager.createSession();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/status",
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      server: {
+        running: true,
+        lanEnabled: true,
+        host: "127.0.0.1",
+        port: 17365,
+        deviceName: "devbox",
+        version: "0.1.0"
+      },
+      pairing: {
+        enabled: true,
+        pairingPayload: {
+          pairingToken: "pairing-token-123",
+          deviceName: "devbox"
+        }
+      },
+      devices: [{ deviceId: "android_1", clientType: "android-app" }],
+      agents: [
+        { id: "codex", displayName: "Codex", activeSessions: 1, latestSessionStatus: "running" },
+        { id: "claude-code", displayName: "Claude Code", activeSessions: 0 },
+        { id: "opencode", displayName: "OpenCode", activeSessions: 0 }
+      ]
+    });
+    expect(response.json().sessions).toHaveLength(1);
+  });
+
+  it("keeps dashboard status available when desktop Codex discovery fails", async () => {
+    const desktopAdapter: AgentAdapter = {
+      id: "codex",
+      displayName: "Codex",
+      start: vi.fn(async () => ({
+        sendInput: vi.fn(),
+        stop: vi.fn(async () => 0)
+      })),
+      discoverSessions: vi.fn(async () => {
+        throw new Error("codex app-server failed");
+      })
+    };
+    const manager = new SessionManager({ adapter: desktopAdapter, eventCacheSize: 10, workspace: "E:/repo" });
+    const app = buildServer({
+      manager,
+      version: "0.1.0",
+      lanEnabled: true,
+      pairingToken: "pairing-token-123",
+      pairingExpiresAt: new Date(Date.now() + 300_000),
+      deviceName: "devbox"
+    });
+    const token = await pair(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/status",
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.sessions).toEqual([]);
+    expect(body.agents).toContainEqual(
+      expect.objectContaining({ id: "codex", activeSessions: 0, availability: "missing" })
+    );
+  });
+
+  it("syncs desktop Codex sessions before listing sessions", async () => {
+    const process = {
+      sendInput: vi.fn(),
+      stop: vi.fn(async () => 0)
+    };
+    const desktopAdapter: AgentAdapter = {
+      id: "codex",
+      displayName: "Codex",
+      start: vi.fn(async () => process),
+      discoverSessions: vi.fn(async () => [
+        {
+          id: "thr_desktop",
+          workspace: "E:/repo",
+          updatedAt: "2026-07-02T20:00:00.000Z"
+        }
+      ]),
+      attachSession: vi.fn(async () => process)
+    };
+    const manager = new SessionManager({ adapter: desktopAdapter, eventCacheSize: 10, workspace: "E:/repo" });
+    const app = buildServer({
+      manager,
+      version: "0.1.0",
+      lanEnabled: true,
+      pairingToken: "pairing-token-123",
+      pairingExpiresAt: new Date(Date.now() + 300_000),
+      deviceName: "devbox"
+    });
+    const token = await pair(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/sessions",
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([
+      expect.objectContaining({
+        id: "codex_thr_desktop",
+        adapterId: "codex",
+        status: "running"
+      })
+    ]);
+  });
+
+  it("disables mobile-created Codex sessions", async () => {
+    const app = createTestServer();
+    const token = await pair(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/sessions",
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ error: "Start Codex sessions on the desktop first" });
+  });
+
+  it("attaches a discovered desktop Codex session without sending input", async () => {
+    const process = {
+      sendInput: vi.fn(),
+      stop: vi.fn(async () => 0)
+    };
+    const desktopAdapter: AgentAdapter = {
+      id: "codex",
+      displayName: "Codex",
+      start: vi.fn(async () => process),
+      discoverSessions: vi.fn(async () => [
+        {
+          id: "thr_desktop",
+          workspace: "E:/repo",
+          updatedAt: "2026-07-02T20:00:00.000Z"
+        }
+      ]),
+      attachSession: vi.fn(async ({ onOutput }) => {
+        onOutput("stdout", "history");
+        return process;
+      })
+    };
+    const manager = new SessionManager({ adapter: desktopAdapter, eventCacheSize: 10, workspace: "E:/repo" });
+    const app = buildServer({
+      manager,
+      version: "0.1.0",
+      lanEnabled: true,
+      pairingToken: "pairing-token-123",
+      pairingExpiresAt: new Date(Date.now() + 300_000),
+      deviceName: "devbox"
+    });
+    const token = await pair(app);
+
+    await app.inject({
+      method: "GET",
+      url: "/sessions",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/sessions/codex_thr_desktop/attach",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const repeat = await app.inject({
+      method: "POST",
+      url: "/sessions/codex_thr_desktop/attach",
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ ok: true });
+    expect(repeat.statusCode).toBe(202);
+    expect(desktopAdapter.attachSession).toHaveBeenCalledTimes(1);
+    expect(process.sendInput).not.toHaveBeenCalled();
+    expect(manager.eventsAfter(0)).toEqual([
+      expect.objectContaining({
+        type: "agent.output",
+        sessionId: "codex_thr_desktop",
+        payload: { text: "history" }
+      })
+    ]);
+  });
+
+  it("rejects revoked devices on protected routes", async () => {
+    const app = createTestServer();
+    const token = await pair(app);
+
+    const revoke = await app.inject({
+      method: "POST",
+      url: "/devices/android_1/revoke",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: "/sessions",
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    expect(revoke.statusCode).toBe(202);
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("lists pending approvals and records approve decisions", async () => {
+    const pending: ApprovalRequest = {
+      approvalId: "appr_1",
+      sessionId: "sess_1",
+      risk: "high",
+      action: "shell.execute",
+      summary: "npm install",
+      status: "pending",
+      createdAt: "2026-06-30T14:30:00.000Z",
+      timeoutSeconds: 300
+    };
+    const storage: SessionStorage = {
+      loadSessions: async () => [],
+      saveSessions: async () => undefined,
+      loadEvents: async () => [],
+      appendEvent: async () => undefined,
+      loadDevices: async (): Promise<DeviceSummary[]> => [],
+      saveDevices: async () => undefined,
+      loadApprovals: async () => [pending],
+      saveApprovals: async () => undefined
+    };
+    const { app, manager } = createTestContext({ storage });
+    await manager.loadFromStorage();
+    const token = await pair(app);
+
+    const list = await app.inject({
+      method: "GET",
+      url: "/approvals",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const respond = await app.inject({
+      method: "POST",
+      url: "/approvals/appr_1/respond",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { decision: "approve" }
+    });
+
+    expect(list.statusCode).toBe(200);
+    expect(list.json()).toMatchObject([{ approvalId: "appr_1", status: "pending" }]);
+    expect(respond.statusCode).toBe(202);
+    expect(respond.json()).toMatchObject({ approvalId: "appr_1", status: "approved" });
+    expect(manager.eventsAfter(0).at(-1)?.type).toBe("approval.approve");
+  });
+});
