@@ -55,13 +55,11 @@ describe("host controller", () => {
             },
             pairing: {
               enabled: true,
-              expiresAt: new Date(Date.now() + 300_000).toISOString(),
               pairingPayload: {
                 host: "127.0.0.1",
                 port: 17365,
                 pairingToken: "pairing-token-123",
-                deviceName: "VS Code",
-                expiresAt: new Date(Date.now() + 300_000).toISOString()
+                deviceName: "VS Code"
               }
             },
             devices: [],

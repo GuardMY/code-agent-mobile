@@ -1,8 +1,12 @@
 package com.agentmobile.app.ui
 
 import com.agentmobile.app.model.ConnectionInfo
+import com.agentmobile.app.model.AgentCapabilitySummary
 import com.agentmobile.app.model.ApprovalRequest
+import com.agentmobile.app.model.ConsoleLine
+import com.agentmobile.app.model.ConsoleLineRole
 import com.agentmobile.app.model.DeviceSummary
+import com.agentmobile.app.model.HostDashboardStatus
 import com.agentmobile.app.model.SessionSummary
 import com.agentmobile.app.net.AgentMobileApi
 import kotlinx.coroutines.Dispatchers
@@ -36,7 +40,7 @@ class ConsoleViewModelTest {
     }
 
     @Test
-    fun connectLoadsSessionsAndSelectsMostRecent() = runTest(dispatcher) {
+    fun connectLoadsDesktopDashboardAndStartsOnSessionList() = runTest(dispatcher) {
         val client = FakeAgentMobileApi(
             sessions = listOf(
                 session("sess_old", "exited", 3),
@@ -48,10 +52,68 @@ class ConsoleViewModelTest {
         viewModel.connect(pairingJson())
         advanceUntilIdle()
 
-        assertEquals("sess_new", viewModel.state.value.session?.id)
+        assertEquals(listOf("sess_old", "sess_new"), viewModel.state.value.sessions.map { it.id })
+        assertEquals("Codex", viewModel.state.value.agents.single().displayName)
+        assertNull(viewModel.state.value.session)
+        assertEquals(false, viewModel.state.value.showingSessionDetail)
         assertEquals(9L, viewModel.state.value.lastSeq)
         assertEquals(1, client.openStreamCalls)
         assertEquals(0, client.createSessionCalls)
+    }
+
+    @Test
+    fun selectSessionOpensSessionDetail() = runTest(dispatcher) {
+        val client = FakeAgentMobileApi(
+            sessions = listOf(
+                session("sess_old", "exited", 3),
+                session("sess_new", "running", 9)
+            )
+        )
+        val viewModel = ConsoleViewModel(client, dispatcher, reconnectDelayMs = 1)
+
+        viewModel.connect(pairingJson())
+        advanceUntilIdle()
+        viewModel.selectSession("sess_new")
+
+        assertEquals("sess_new", viewModel.state.value.session?.id)
+        assertEquals(true, viewModel.state.value.showingSessionDetail)
+    }
+
+    @Test
+    fun showSessionListReturnsFromSessionDetail() = runTest(dispatcher) {
+        val client = FakeAgentMobileApi(sessions = listOf(session("sess_new", "running", 9)))
+        val viewModel = ConsoleViewModel(client, dispatcher, reconnectDelayMs = 1)
+
+        viewModel.connect(pairingJson())
+        advanceUntilIdle()
+        viewModel.selectSession("sess_new")
+        viewModel.showSessionList()
+
+        assertNull(viewModel.state.value.session)
+        assertEquals(false, viewModel.state.value.showingSessionDetail)
+    }
+
+    @Test
+    fun selectSessionLoadsCachedHistoryForThatSession() = runTest(dispatcher) {
+        val client = FakeAgentMobileApi(
+            sessions = listOf(
+                session("sess_old", "running", 3),
+                session("sess_new", "running", 9)
+            ),
+            events = listOf(
+                ConsoleLine(2, "old session output", ConsoleLineRole.AGENT, "sess_old"),
+                ConsoleLine(7, "new session history", ConsoleLineRole.AGENT, "sess_new")
+            )
+        )
+        val viewModel = ConsoleViewModel(client, dispatcher, reconnectDelayMs = 1)
+
+        viewModel.connect(pairingJson())
+        advanceUntilIdle()
+        viewModel.selectSession("sess_new")
+        advanceUntilIdle()
+
+        assertEquals(listOf("new session history"), viewModel.state.value.lines.map { it.text })
+        assertEquals(0L, client.listEventsLastSeqs.single())
     }
 
     @Test
@@ -61,6 +123,7 @@ class ConsoleViewModelTest {
 
         viewModel.connect(pairingJson())
         advanceUntilIdle()
+        viewModel.selectSession("codex_thr_1")
         viewModel.createSession()
         advanceUntilIdle()
 
@@ -75,10 +138,51 @@ class ConsoleViewModelTest {
 
         viewModel.connect(pairingJson())
         advanceUntilIdle()
+        viewModel.selectSession("sess_done")
         viewModel.send("hello")
         advanceUntilIdle()
 
         assertNull(client.sentText)
+    }
+
+    @Test
+    fun sendAddsUserLineToConversation() = runTest(dispatcher) {
+        val client = FakeAgentMobileApi(sessions = listOf(session("sess_1", "running", 5)))
+        val viewModel = ConsoleViewModel(client, dispatcher, reconnectDelayMs = 1)
+
+        viewModel.connect(pairingJson())
+        advanceUntilIdle()
+        viewModel.selectSession("sess_1")
+        viewModel.send("show **status**")
+        advanceUntilIdle()
+
+        assertEquals("show **status**", client.sentText)
+        assertEquals(ConsoleLineRole.USER, viewModel.state.value.lines.single().role)
+        assertEquals("show **status**", viewModel.state.value.lines.single().text)
+    }
+
+    @Test
+    fun agentOutputAddsAgentLineToConversation() = runTest(dispatcher) {
+        val client = FakeAgentMobileApi(sessions = listOf(session("sess_1", "running", 5)))
+        val viewModel = ConsoleViewModel(client, dispatcher, reconnectDelayMs = 1)
+
+        viewModel.connect(pairingJson())
+        advanceUntilIdle()
+        client.listener!!.onMessage(
+            FakeWebSocket(),
+            """
+            {
+              "type": "agent.output",
+              "seq": 6,
+              "payload": {
+                "text": "## Done\n- Built APK"
+              }
+            }
+            """.trimIndent()
+        )
+
+        assertEquals(ConsoleLineRole.AGENT, viewModel.state.value.lines.single().role)
+        assertEquals("## Done\n- Built APK", viewModel.state.value.lines.single().text)
     }
 
     @Test
@@ -167,17 +271,24 @@ class ConsoleViewModelTest {
           "host": "127.0.0.1",
           "port": 17365,
           "pairingToken": "pairing-token-123",
-          "deviceName": "VS Code",
-          "expiresAt": "2026-06-30T14:30:00.000Z"
+          "deviceName": "VS Code"
         }
         """.trimIndent()
 
     private fun session(id: String, status: String, lastSeq: Long): SessionSummary =
-        SessionSummary(id, "codex", "E:/repo", status, "2026-06-30T14:30:00.000Z", lastSeq)
+        SessionSummary(
+            id = id,
+            adapterId = "codex",
+            workspace = "E:/repo",
+            status = status,
+            startedAt = "2026-06-30T14:30:00.000Z",
+            lastSeq = lastSeq
+        )
 }
 
 private class FakeAgentMobileApi(
-    private val sessions: List<SessionSummary>
+    private val sessions: List<SessionSummary>,
+    private val events: List<ConsoleLine> = emptyList()
 ) : AgentMobileApi {
     var sentText: String? = null
     var listener: WebSocketListener? = null
@@ -185,16 +296,30 @@ private class FakeAgentMobileApi(
     var createSessionCalls = 0
     var approvalDecision: String? = null
     val lastSeqs = mutableListOf<Long>()
+    val listEventsLastSeqs = mutableListOf<Long>()
 
     override fun pair(host: String, port: Int, pairingToken: String, deviceId: String): ConnectionInfo =
         ConnectionInfo(host, port, "access_123")
 
     override fun listSessions(connection: ConnectionInfo): List<SessionSummary> = sessions
 
+    override fun listEvents(connection: ConnectionInfo, lastSeq: Long): List<ConsoleLine> {
+        listEventsLastSeqs += lastSeq
+        return events.filter { it.seq > lastSeq }
+    }
+
+    override fun getStatus(connection: ConnectionInfo): HostDashboardStatus =
+        HostDashboardStatus(
+            agents = listOf(AgentCapabilitySummary("codex", "Codex", "available", 1, "running")),
+            sessions = sessions
+        )
+
     override fun createSession(connection: ConnectionInfo): SessionSummary {
         createSessionCalls += 1
         return sessions.first()
     }
+
+    override fun attachSession(connection: ConnectionInfo, sessionId: String) = Unit
 
     override fun sendInput(connection: ConnectionInfo, sessionId: String, text: String) {
         sentText = text

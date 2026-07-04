@@ -130,7 +130,14 @@ export class SessionManager {
     }
     for (const session of discovered.filter((item) => normalizePath(item.workspace) === normalizePath(this.options.workspace))) {
       const sessionId = `${this.options.adapter.id}_${session.id}`;
-      if (this.sessions.has(sessionId)) {
+      const existing = this.sessions.get(sessionId);
+      if (existing) {
+        existing.externalId = session.id;
+        existing.summary.title = session.title;
+        if (existing.summary.status !== "running") {
+          existing.summary.status = "running";
+          existing.process = undefined;
+        }
         continue;
       }
       this.sessions.set(sessionId, {
@@ -138,6 +145,7 @@ export class SessionManager {
         summary: {
           id: sessionId,
           adapterId: this.options.adapter.id,
+          title: session.title,
           workspace: session.workspace,
           status: "running",
           startedAt: session.updatedAt ?? new Date().toISOString(),

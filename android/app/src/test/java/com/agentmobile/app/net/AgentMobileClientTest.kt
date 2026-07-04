@@ -31,6 +31,7 @@ class AgentMobileClientTest {
                       {
                         "id": "sess_1",
                         "adapterId": "codex",
+                        "title": "Fix mobile handoff",
                         "workspace": "E:/repo",
                         "status": "running",
                         "startedAt": "2026-06-30T14:30:00.000Z",
@@ -46,9 +47,94 @@ class AgentMobileClientTest {
             val sessions = client.listSessions(ConnectionInfo(server.hostName, server.port, "access_123"))
 
             assertEquals("sess_1", sessions.single().id)
+            assertEquals("Fix mobile handoff", sessions.single().title)
             assertEquals("running", sessions.single().status)
             assertEquals(7L, sessions.single().lastSeq)
             assertEquals("Bearer access_123", server.takeRequest().getHeader("Authorization"))
+        }
+    }
+
+    @Test
+    fun getStatusParsesAgentsAndDesktopSessions() {
+        MockWebServer().use { server ->
+            server.enqueue(
+                MockResponse().setBody(
+                    """
+                    {
+                      "agents": [
+                        {
+                          "id": "codex",
+                          "displayName": "Codex",
+                          "availability": "available",
+                          "activeSessions": 1,
+                          "latestSessionStatus": "running"
+                        }
+                      ],
+                      "sessions": [
+                        {
+                          "id": "codex_thr_desktop",
+                          "adapterId": "codex",
+                          "title": "Desktop thread",
+                          "workspace": "E:/repo",
+                          "status": "running",
+                          "startedAt": "2026-07-02T12:00:00.000Z",
+                          "lastSeq": 7
+                        }
+                      ]
+                    }
+                    """.trimIndent()
+                )
+            )
+            server.start()
+            val client = AgentMobileClient()
+
+            val status = client.getStatus(ConnectionInfo(server.hostName, server.port, "access_123"))
+
+            assertEquals("Codex", status.agents.single().displayName)
+            assertEquals("Desktop thread", status.sessions.single().title)
+            assertEquals("/status", server.takeRequest().path)
+        }
+    }
+
+    @Test
+    fun listEventsParsesAgentOutputLines() {
+        MockWebServer().use { server ->
+            server.enqueue(
+                MockResponse().setBody(
+                    """
+                    [
+                      {
+                        "id": "msg_1",
+                        "type": "session.started",
+                        "sessionId": "sess_1",
+                        "deviceId": "agent-host",
+                        "timestamp": "2026-07-02T12:00:00.000Z",
+                        "seq": 1,
+                        "payload": {}
+                      },
+                      {
+                        "id": "msg_2",
+                        "type": "agent.output",
+                        "sessionId": "sess_1",
+                        "deviceId": "agent-host",
+                        "timestamp": "2026-07-02T12:00:01.000Z",
+                        "seq": 2,
+                        "payload": {
+                          "text": "history"
+                        }
+                      }
+                    ]
+                    """.trimIndent()
+                )
+            )
+            server.start()
+            val client = AgentMobileClient()
+
+            val lines = client.listEvents(ConnectionInfo(server.hostName, server.port, "access_123"), 0)
+
+            assertEquals("history", lines.single().text)
+            assertEquals("sess_1", lines.single().sessionId)
+            assertEquals("/events?lastSeq=0", server.takeRequest().path)
         }
     }
 
@@ -108,8 +194,7 @@ class AgentMobileClientTest {
                     [
                       {
                         "deviceId": "android_1",
-                        "pairedAt": "2026-06-30T14:30:00.000Z",
-                        "accessTokenExpiresAt": "2026-06-30T15:30:00.000Z"
+                        "pairedAt": "2026-06-30T14:30:00.000Z"
                       }
                     ]
                     """.trimIndent()

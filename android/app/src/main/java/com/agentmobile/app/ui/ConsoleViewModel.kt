@@ -3,8 +3,10 @@ package com.agentmobile.app.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.agentmobile.app.model.ApprovalRequest
+import com.agentmobile.app.model.AgentCapabilitySummary
 import com.agentmobile.app.model.ConnectionInfo
 import com.agentmobile.app.model.ConsoleLine
+import com.agentmobile.app.model.ConsoleLineRole
 import com.agentmobile.app.model.PairingPayload
 import com.agentmobile.app.model.SessionSummary
 import com.agentmobile.app.net.AgentMobileApi
@@ -24,12 +26,15 @@ import org.json.JSONObject
 
 data class ConsoleUiState(
     val connection: ConnectionInfo? = null,
+    val agents: List<AgentCapabilitySummary> = emptyList(),
+    val sessions: List<SessionSummary> = emptyList(),
     val session: SessionSummary? = null,
     val lines: List<ConsoleLine> = emptyList(),
     val approvals: List<ApprovalRequest> = emptyList(),
     val lastSeq: Long = 0,
     val error: String? = null,
-    val connected: Boolean = false
+    val connected: Boolean = false,
+    val showingSessionDetail: Boolean = false
 )
 
 class ConsoleViewModel(
@@ -48,14 +53,18 @@ class ConsoleViewModel(
             runCatching {
                 val payload: PairingPayload = PairingParser.parse(pairingJson)
                 val connection = client.pair(payload.host, payload.port, payload.pairingToken, "android")
-                val sessions = client.listSessions(connection)
-                connection to sessions.maxByOrNull { it.lastSeq }
-            }.onSuccess { (connection, session) ->
+                val status = client.getStatus(connection)
+                connection to status
+            }.onSuccess { (connection, status) ->
+                val lastSeq = status.sessions.maxOfOrNull { it.lastSeq } ?: 0
                 _state.update {
                     it.copy(
                         connection = connection,
-                        session = session,
-                        lastSeq = maxOf(it.lastSeq, session?.lastSeq ?: 0),
+                        agents = status.agents,
+                        sessions = status.sessions,
+                        session = null,
+                        showingSessionDetail = false,
+                        lastSeq = maxOf(it.lastSeq, lastSeq),
                         connected = true,
                         error = null
                     )
@@ -67,6 +76,33 @@ class ConsoleViewModel(
         }
     }
 
+    fun selectSession(sessionId: String) {
+        val connection = _state.value.connection ?: return
+        val selected = _state.value.sessions.firstOrNull { it.id == sessionId } ?: return
+        _state.update { it.copy(session = selected, showingSessionDetail = true, error = null) }
+        viewModelScope.launch(ioDispatcher) {
+            runCatching {
+                val history = client.listEvents(connection, 0)
+                    .filter { it.sessionId == null || it.sessionId == sessionId }
+                client.attachSession(connection, sessionId)
+                history
+            }.onSuccess { history ->
+                _state.update {
+                    it.copy(
+                        lines = mergeLines(it.lines, history),
+                        lastSeq = maxOf(it.lastSeq, history.maxOfOrNull { line -> line.seq } ?: 0),
+                        error = null
+                    )
+                }
+            }
+                .onFailure { error -> _state.update { it.copy(error = error.message) } }
+        }
+    }
+
+    fun showSessionList() {
+        _state.update { it.copy(showingSessionDetail = false, session = null, error = null) }
+    }
+
     fun createSession() {
         _state.update { it.copy(error = "Start Codex sessions on the desktop first") }
     }
@@ -75,8 +111,12 @@ class ConsoleViewModel(
         val connection = _state.value.connection ?: return
         val session = _state.value.session ?: return
         if (text.isBlank() || session.status != "running") return
+        val trimmedText = text.trim()
+        _state.update {
+            it.copy(lines = it.lines + ConsoleLine(it.lastSeq, trimmedText, ConsoleLineRole.USER, session.id), error = null)
+        }
         viewModelScope.launch(ioDispatcher) {
-            runCatching { client.sendInput(connection, session.id, text) }
+            runCatching { client.sendInput(connection, session.id, trimmedText) }
                 .onFailure { error -> _state.update { it.copy(error = error.message) } }
         }
     }
@@ -114,19 +154,40 @@ class ConsoleViewModel(
                 val type = event.getString("type")
                 if (type == "agent.output") {
                     val output = event.getJSONObject("payload").getString("text")
+                    val sessionId = event.optString("sessionId").ifBlank { null }
                     _state.update {
-                        it.copy(lastSeq = seq, connected = true, lines = it.lines + ConsoleLine(seq, output), error = null)
-                    }
-                } else if (type == "session.started") {
-                    val item = event.getJSONObject("payload").getJSONObject("session")
-                    _state.update { it.copy(lastSeq = seq, connected = true, session = parseSession(item), error = null) }
-                } else if (type == "session.finished") {
-                    _state.update {
-                        val current = it.session
                         it.copy(
                             lastSeq = seq,
                             connected = true,
-                            session = current?.copy(status = "exited", lastSeq = seq),
+                            lines = mergeLines(it.lines, listOf(ConsoleLine(seq, output, ConsoleLineRole.AGENT, sessionId))),
+                            error = null
+                        )
+                    }
+                } else if (type == "session.started") {
+                    val item = event.getJSONObject("payload").getJSONObject("session")
+                    val session = parseSession(item)
+                    _state.update {
+                        it.copy(
+                            lastSeq = seq,
+                            connected = true,
+                            sessions = upsertSession(it.sessions, session),
+                            session = if (it.session?.id == session.id) session else it.session,
+                            error = null
+                        )
+                    }
+                } else if (type == "session.finished") {
+                    _state.update {
+                        val current = it.session
+                        val sessionId = event.optString("sessionId").ifBlank { current?.id }
+                        it.copy(
+                            lastSeq = seq,
+                            connected = true,
+                            sessions = it.sessions.map { session ->
+                                if (session.id == sessionId) session.copy(status = "exited", lastSeq = seq) else session
+                            },
+                            session = current?.let { session ->
+                                if (session.id == sessionId) session.copy(status = "exited", lastSeq = seq) else session
+                            },
                             error = null
                         )
                     }
@@ -177,11 +238,24 @@ class ConsoleViewModel(
         SessionSummary(
             id = item.getString("id"),
             adapterId = item.getString("adapterId"),
+            title = item.optString("title").ifBlank { null },
             workspace = item.getString("workspace"),
             status = item.getString("status"),
             startedAt = item.getString("startedAt"),
             lastSeq = item.getLong("lastSeq")
         )
+
+    private fun upsertSession(sessions: List<SessionSummary>, session: SessionSummary): List<SessionSummary> =
+        if (sessions.any { it.id == session.id }) {
+            sessions.map { if (it.id == session.id) session else it }
+        } else {
+            sessions + session
+        }
+
+    private fun mergeLines(current: List<ConsoleLine>, incoming: List<ConsoleLine>): List<ConsoleLine> =
+        (current + incoming)
+            .distinctBy { line -> "${line.seq}:${line.sessionId}:${line.role}:${line.text}" }
+            .sortedBy { line -> line.seq }
 
     private fun parseApproval(item: JSONObject): ApprovalRequest =
         ApprovalRequest(

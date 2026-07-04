@@ -407,6 +407,7 @@ function readTexts(value: unknown): string[] {
     ...readTexts(record.message),
     ...readTexts(record.item),
     ...readTexts(record.items),
+    ...readTexts(record.turns),
     ...readTexts(record.thread)
   ];
 }

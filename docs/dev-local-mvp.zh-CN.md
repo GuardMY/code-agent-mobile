@@ -1,99 +1,67 @@
-# 本地局域网 MVP 开发指南
+﻿# 鏈湴灞€鍩熺綉 MVP 寮€鍙戞寚鍗?
+## 鍓嶇疆鏉′欢
 
-## 前置条件
-
-- Node.js 24 或更高版本。
-- npm 11 或更高版本。
-- `codex` CLI 可在 `PATH` 中调用，或在 VS Code 设置中配置 `agentMobile.codexCommand`。
-- 构建 Android App 需要 Android Studio 和 Android SDK 35。
-
-本仓库包含 TypeScript Host 和 VS Code 插件构建。Android 源码位于 `android`。
-
-## 安装
+- Node.js 24 鎴栨洿楂樼増鏈€?- npm 11 鎴栨洿楂樼増鏈€?- `codex` CLI 鍙湪 `PATH` 涓皟鐢紝鎴栧湪 VS Code 璁剧疆涓厤缃?`agentMobile.codexCommand`銆?- 鏋勫缓 Android App 闇€瑕?Android Studio 鍜?Android SDK 35銆?
+鏈粨搴撳寘鍚?TypeScript Host 鍜?VS Code 鎻掍欢鏋勫缓銆侫ndroid 婧愮爜浣嶄簬 `android`銆?
+## 瀹夎
 
 ```powershell
 npm install
 ```
 
-## 构建和测试 TypeScript 包
-
+## 鏋勫缓鍜屾祴璇?TypeScript 鍖?
 ```powershell
 npm run build
 npm run test
 ```
 
-## 直接运行 Agent Host
+## 鐩存帴杩愯 Agent Host
 
 ```powershell
 npm run build
 npm run dev:host -- --host 127.0.0.1 --port 17365 --workspace E:\Code\code-agent-mobile --pairing-token pairing-token-123
 ```
 
-Host 启动后会输出一条 JSON ready 消息，其中包含对外地址、端口、配对 token 和过期时间。
+Host 启动后会输出一条 JSON ready 消息，其中包含对外地址、端口和配对 token。配对后的访问令牌长期有效，直到桌面端插件或移动端手动解绑。
+## VS Code 鎻掍欢璋冭瘯娴佺▼
 
-## VS Code 插件调试流程
+1. 鍦?VS Code 涓墦寮€浠撳簱鏍圭洰褰曘€?2. 鎵ц `npm install`銆?3. 鎵ц `npm run build`銆?4. 浠?Extension Development Host 妯″紡鍚姩鎻掍欢銆?5. 鎵撳紑 `Agent Mobile` Activity Bar 闈㈡澘銆?6. 鎵ц `Agent Mobile: Start Host` 鍚姩鏈満 loopback 妯″紡銆?7. 鎵ц `Agent Mobile: Enable LAN Pairing` 灏?Host 鏆撮湶鍒?`0.0.0.0`銆?8. 鍦?Android App 涓壂鎻忎簩缁寸爜鎴栫矘璐撮厤瀵?JSON銆?
+## VS Code 鎻掍欢鎵撳寘
 
-1. 在 VS Code 中打开仓库根目录。
-2. 执行 `npm install`。
-3. 执行 `npm run build`。
-4. 以 Extension Development Host 模式启动插件。
-5. 打开 `Agent Mobile` Activity Bar 面板。
-6. 执行 `Agent Mobile: Start Host` 启动本机 loopback 模式。
-7. 执行 `Agent Mobile: Enable LAN Pairing` 将 Host 暴露到 `0.0.0.0`。
-8. 在 Android App 中扫描二维码或粘贴配对 JSON。
-
-## VS Code 插件打包
-
-构建插件并生成 `.vsix`：
-
+鏋勫缓鎻掍欢骞剁敓鎴?`.vsix`锛?
 ```powershell
 npm run package:extension
 ```
 
-生成文件位于 `vscode-extension`，名称类似：
+鐢熸垚鏂囦欢浣嶄簬 `vscode-extension`锛屽悕绉扮被浼硷細
 
 ```text
 agent-mobile-control-0.1.0.vsix
 ```
 
-安装到已有 VS Code：
-
+瀹夎鍒板凡鏈?VS Code锛?
 ```powershell
 code --install-extension vscode-extension/agent-mobile-control-0.1.0.vsix
 ```
 
-如果 `code` 命令不可用，在 VS Code 中运行 `Extensions: Install from VSIX...`，然后选择生成的 VSIX 文件。
+濡傛灉 `code` 鍛戒护涓嶅彲鐢紝鍦?VS Code 涓繍琛?`Extensions: Install from VSIX...`锛岀劧鍚庨€夋嫨鐢熸垚鐨?VSIX 鏂囦欢銆?
+瀹夎鍚庨噸杞?VS Code锛屾墦寮€ `Agent Mobile` 闈㈡澘锛屾墽琛?`Agent Mobile: Start Host`銆傛彃浠朵細閫氳繃 `agentMobile.codexCommand` 鍚姩 `codex app-server`锛岃€屼笉鏄惎鍔ㄧ嫭绔嬬殑浜や簰寮?`codex` CLI 浼氳瘽銆?
+## 鎻掍欢閰嶇疆
 
-安装后重载 VS Code，打开 `Agent Mobile` 面板，执行 `Agent Mobile: Start Host`。插件会通过 `agentMobile.codexCommand` 启动 `codex app-server`，而不是启动独立的交互式 `codex` CLI 会话。
+- `agentMobile.port`锛氶粯璁?`17365`銆?- `agentMobile.codexCommand`锛氶粯璁?`codex`銆?- `agentMobile.eventCacheSize`锛氶粯璁?`500`銆?
+## Android 璋冭瘯娴佺▼
 
-## 插件配置
-
-- `agentMobile.port`：默认 `17365`。
-- `agentMobile.codexCommand`：默认 `codex`。
-- `agentMobile.eventCacheSize`：默认 `500`。
-
-## Android 调试流程
-
-1. 在 Android Studio 中打开 `android`。
-2. 构建并安装 app。
-3. 确保手机和开发机在同一网络。
-4. 在 VS Code 插件中启用 LAN Pairing。
-5. 在 App 中扫描二维码或粘贴配对 JSON。
-6. 连接后选择 Codex 会话并发送 prompt。
-
-构建命令：
-
+1. 鍦?Android Studio 涓墦寮€ `android`銆?2. 鏋勫缓骞跺畨瑁?app銆?3. 纭繚鎵嬫満鍜屽紑鍙戞満鍦ㄥ悓涓€缃戠粶銆?4. 鍦?VS Code 鎻掍欢涓惎鐢?LAN Pairing銆?5. 鍦?App 涓壂鎻忎簩缁寸爜鎴栫矘璐撮厤瀵?JSON銆?6. 杩炴帴鍚庨€夋嫨 Codex 浼氳瘽骞跺彂閫?prompt銆?
+鏋勫缓鍛戒护锛?
 ```powershell
 cd android
 .\gradlew.bat :app:assembleDebug
 ```
 
-如果没有 Gradle wrapper，可使用本机 Gradle 或通过 Android Studio 生成 wrapper。
+濡傛灉娌℃湁 Gradle wrapper锛屽彲浣跨敤鏈満 Gradle 鎴栭€氳繃 Android Studio 鐢熸垚 wrapper銆?
+## 楠岃瘉
 
-## 验证
-
-常用验证命令：
-
+甯哥敤楠岃瘉鍛戒护锛?
 ```powershell
 npm run build
 npm run test
@@ -101,4 +69,4 @@ npm run test -w @agent-mobile/agent-host
 npm run test -w agent-mobile-control
 ```
 
-如果改动触及 Android 或 VS Code 插件，必须遵守根目录 `AGENTS.md` 中的强制重建规则。
+濡傛灉鏀瑰姩瑙﹀強 Android 鎴?VS Code 鎻掍欢锛屽繀椤婚伒瀹堟牴鐩綍 `AGENTS.md` 涓殑寮哄埗閲嶅缓瑙勫垯銆?

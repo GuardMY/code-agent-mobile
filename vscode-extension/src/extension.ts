@@ -211,6 +211,7 @@ class PairingViewProvider implements vscode.WebviewViewProvider {
     await this.safeRefresh();
     try {
       await client.attachSession(sessionId);
+      await this.fetchLatestEvents(client);
       this.subscribeToStream();
     } catch (error) {
       this.state.consoleError = error instanceof Error ? error.message : String(error);
@@ -220,11 +221,16 @@ class PairingViewProvider implements vscode.WebviewViewProvider {
 
   private async sendInput(sessionId: string | undefined, text: string): Promise<void> {
     const targetSessionId = sessionId ?? this.state.selectedSessionId;
-    if (!targetSessionId || !text.trim()) {
+    const trimmedText = text.trim();
+    if (!targetSessionId || !trimmedText) {
       return;
     }
     try {
-      await this.requireHostClient().sendInput(targetSessionId, text);
+      await this.requireHostClient().sendInput(targetSessionId, trimmedText);
+      this.state.sessionEvents = [
+        ...this.state.sessionEvents,
+        { seq: -Date.now(), sessionId: targetSessionId, type: "agent.input", text: trimmedText }
+      ].slice(-500);
       this.state.consoleError = undefined;
     } catch (error) {
       this.state.consoleError = error instanceof Error ? error.message : String(error);
@@ -254,10 +260,32 @@ class PairingViewProvider implements vscode.WebviewViewProvider {
         void this.safeRefresh();
       },
       onError: (error) => {
+        if (error === "Host event stream failed" && this.hasEventsForSelectedSession()) {
+          return;
+        }
         this.state.consoleError = error;
         void this.safeRefresh();
       }
     });
+  }
+
+  private async fetchLatestEvents(client: LocalHostSessionClient): Promise<void> {
+    const events = await client.fetchEvents(this.latestEventSeq());
+    for (const event of events) {
+      if (this.state.sessionEvents.some((existing) => existing.seq === event.seq && existing.sessionId === event.sessionId)) {
+        continue;
+      }
+      this.state.sessionEvents = [...this.state.sessionEvents, event].slice(-500);
+    }
+    this.state.consoleError = undefined;
+  }
+
+  private latestEventSeq(): number {
+    return this.state.sessionEvents.reduce((max, event) => Math.max(max, event.seq > 0 ? event.seq : 0), 0);
+  }
+
+  private hasEventsForSelectedSession(): boolean {
+    return this.state.sessionEvents.some((event) => event.sessionId === this.state.selectedSessionId);
   }
 
   private requireHostClient(): LocalHostSessionClient {

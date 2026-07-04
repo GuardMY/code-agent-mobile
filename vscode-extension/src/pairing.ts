@@ -6,7 +6,6 @@ export interface PairingPayload {
   port: number;
   pairingToken: string;
   deviceName: string;
-  expiresAt: string;
 }
 
 export function createPairingToken(): string {
@@ -23,8 +22,7 @@ export function createPairingPayload(input: {
     host: input.host,
     port: input.port,
     pairingToken: input.pairingToken,
-    deviceName: input.deviceName,
-    expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString()
+    deviceName: input.deviceName
   };
 }
 

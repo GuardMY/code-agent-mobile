@@ -13,5 +13,6 @@
   },
   "devDependencies": {
     "vitest": "^3.2.4"
-  }
+  },
+  "license": "Apache-2.0"
 }

@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderPairingHtml } from "./webview.js";
 
-const expiresAt = new Date(Date.now() + 300_000).toISOString();
-
 function dashboard(input: {
   devices?: Parameters<typeof renderPairingHtml>[0]["dashboard"] extends { reachable: true; status: infer T } ? T["devices"] : never;
   agents?: Parameters<typeof renderPairingHtml>[0]["dashboard"] extends { reachable: true; status: infer T } ? T["agents"] : never;
@@ -21,13 +19,11 @@ function dashboard(input: {
       },
       pairing: {
         enabled: true,
-        expiresAt,
         pairingPayload: {
           host: "192.168.1.10",
           port: 17365,
           pairingToken: "pairing-token-123",
-          deviceName: "VS Code",
-          expiresAt
+          deviceName: "VS Code"
         }
       },
       devices: input.devices ?? [],
@@ -83,14 +79,17 @@ describe("webview html", () => {
       qrSvg: "<svg></svg>",
       dashboard: dashboard({
         devices: [
-          { deviceId: "android_1", clientType: "android-app", pairedAt: "2026-06-30T14:30:00.000Z", accessTokenExpiresAt: expiresAt },
-          { deviceId: "wechat_1", clientType: "wechat-mini-program", pairedAt: "2026-06-30T14:35:00.000Z", accessTokenExpiresAt: expiresAt }
+          { deviceId: "android_1", clientType: "android-app", pairedAt: "2026-06-30T14:30:00.000Z" },
+          { deviceId: "wechat_1", clientType: "wechat-mini-program", pairedAt: "2026-06-30T14:35:00.000Z" }
         ]
       })
     });
 
     expect(html).toContain("Android 应用");
     expect(html).toContain("微信小程序");
+    expect(html).toContain("长期有效");
+    expect(html).not.toContain("令牌过期");
+    expect(html).not.toContain("accessTokenExpiresAt");
   });
 
   it("renders created Codex sessions from dashboard status", async () => {
@@ -107,6 +106,7 @@ describe("webview html", () => {
           {
             id: "sess_codex_1",
             adapterId: "codex",
+            title: "Fix mobile handoff",
             workspace: "E:/Code/code-agent-mobile",
             status: "running",
             startedAt: "2026-07-02T12:00:00.000Z",
@@ -117,9 +117,65 @@ describe("webview html", () => {
     });
 
     expect(html).toContain("Codex 会话");
-    expect(html).toContain("sess_codex_1");
-    expect(html).toContain("codex");
-    expect(html).toContain("running");
+    expect(html).toContain("Fix mobile handoff");
+    expect(html).toContain("2026-07-02 20:00");
+    expect(html).not.toContain("2026-07-02T12:00:00.000Z");
+    expect(html).not.toContain(">sess_codex_1<");
+    expect(html).not.toContain("codex / running / seq 7");
+    expect(html).not.toContain("E:/Code/code-agent-mobile");
+  });
+
+  it("keeps additional Codex sessions in a scrollable list after the latest three", async () => {
+    const html = await renderPairingHtml({
+      status: "running",
+      lanEnabled: true,
+      pairingJson: "{}",
+      qrSvg: "<svg></svg>",
+      dashboard: dashboard({
+        sessions: [1, 2, 3, 4].map((index) => ({
+          id: `sess_codex_${index}`,
+          adapterId: "codex",
+          title: `Codex session ${index}`,
+          workspace: "E:/Code/code-agent-mobile",
+          status: "running",
+          startedAt: `2026-07-02T12:0${index}:00.000Z`,
+          lastSeq: index
+        }))
+      })
+    });
+
+    expect(html).toContain('<div class="session-list">');
+    expect(html).toContain("Codex session 1");
+    expect(html).toContain("Codex session 2");
+    expect(html).toContain("Codex session 3");
+    expect(html).toContain("Codex session 4");
+  });
+
+  it("truncates long Codex session titles while preserving the full title as hover text", async () => {
+    const longTitle = "Investigate the Codex mobile session list timestamp rendering and title overflow behavior";
+    const html = await renderPairingHtml({
+      status: "running",
+      lanEnabled: true,
+      pairingJson: "{}",
+      qrSvg: "<svg></svg>",
+      dashboard: dashboard({
+        sessions: [
+          {
+            id: "sess_codex_long",
+            adapterId: "codex",
+            title: longTitle,
+            workspace: "E:/Code/code-agent-mobile",
+            status: "running",
+            startedAt: "2026-07-02T12:00:00.000Z",
+            lastSeq: 7
+          }
+        ]
+      })
+    });
+
+    expect(html).toContain('title="Investigate the Codex mobile session list timestamp rendering and title overflow behavior"');
+    expect(html).toContain("Investigate the Codex mobile session list...");
+    expect(html).not.toContain(`<div class="label">${longTitle}</div>`);
   });
 
   it("renders a Codex session console with controls and selected output", async () => {
@@ -141,6 +197,7 @@ describe("webview html", () => {
           {
             id: "codex_thr_desktop",
             adapterId: "codex",
+            title: "Fix mobile handoff",
             workspace: "E:/Code/code-agent-mobile",
             status: "running",
             startedAt: "2026-07-02T12:00:00.000Z",
@@ -153,11 +210,46 @@ describe("webview html", () => {
     expect(html).toContain("Codex 会话");
     expect(html).toContain('data-command="selectSession"');
     expect(html).toContain('data-session-id="codex_thr_desktop"');
+    expect(html).toContain("Fix mobile handoff");
+    expect(html).not.toContain("codex_thr_desktop / running");
     expect(html).toContain("hello from codex");
     expect(html).not.toContain("other session");
     expect(html).toContain('data-command="sendInput"');
     expect(html).toContain('data-command="stopSession"');
     expect(html).toContain('data-command="refreshSessions"');
     expect(html).toContain("<textarea");
+  });
+
+  it("renders session messages as left agent and right user markdown bubbles", async () => {
+    const html = await renderPairingHtml({
+      status: "running",
+      lanEnabled: true,
+      pairingJson: "{}",
+      qrSvg: "<svg></svg>",
+      selectedSessionId: "codex_thr_desktop",
+      sessionEvents: [
+        { seq: 3, sessionId: "codex_thr_desktop", type: "agent.output", text: "## Done\n- Built APK" },
+        { seq: 4, sessionId: "codex_thr_desktop", type: "agent.input", text: "show **status**" }
+      ],
+      dashboard: dashboard({
+        sessions: [
+          {
+            id: "codex_thr_desktop",
+            adapterId: "codex",
+            title: "Fix mobile handoff",
+            workspace: "E:/Code/code-agent-mobile",
+            status: "running",
+            startedAt: "2026-07-02T12:00:00.000Z",
+            lastSeq: 7
+          }
+        ]
+      })
+    });
+
+    expect(html).toContain('class="message agent-message"');
+    expect(html).toContain('class="message user-message"');
+    expect(html).toContain("<h2>Done</h2>");
+    expect(html).toContain("<li>Built APK</li>");
+    expect(html).toContain("show <strong>status</strong>");
   });
 });

@@ -37,18 +37,12 @@ export type Envelope<TPayload = unknown> = Omit<z.infer<typeof envelopeSchema>, 
   payload: TPayload;
 };
 
-export const pairingPayloadSchema = z
-  .object({
-    host: z.string().min(1),
-    port: z.number().int().min(1).max(65535),
-    pairingToken: z.string().min(8),
-    deviceName: z.string().min(1),
-    expiresAt: z.string().datetime()
-  })
-  .refine((payload) => Date.parse(payload.expiresAt) > Date.now(), {
-    message: "Pairing token is expired",
-    path: ["expiresAt"]
-  });
+export const pairingPayloadSchema = z.object({
+  host: z.string().min(1),
+  port: z.number().int().min(1).max(65535),
+  pairingToken: z.string().min(8),
+  deviceName: z.string().min(1)
+});
 export type PairingPayload = z.infer<typeof pairingPayloadSchema>;
 
 export const clientTypeSchema = z.enum(["android-app", "ios-app", "wechat-mini-program", "unknown"]);
@@ -60,6 +54,7 @@ export type SessionStatus = z.infer<typeof sessionStatusSchema>;
 export const sessionSummarySchema = z.object({
   id: z.string().min(1),
   adapterId: z.string().min(1),
+  title: z.string().min(1).optional(),
   workspace: z.string().min(1),
   status: sessionStatusSchema,
   startedAt: z.string().datetime(),
@@ -71,7 +66,6 @@ export const deviceSummarySchema = z.object({
   deviceId: z.string().min(1),
   clientType: clientTypeSchema,
   pairedAt: z.string().datetime(),
-  accessTokenExpiresAt: z.string().datetime(),
   revokedAt: z.string().datetime().optional()
 });
 export type DeviceSummary = z.infer<typeof deviceSummarySchema>;
@@ -99,7 +93,6 @@ export const hostDashboardStatusSchema = z.object({
   }),
   pairing: z.object({
     enabled: z.boolean(),
-    expiresAt: z.string().datetime(),
     pairingPayload: pairingPayloadSchema
   }),
   devices: z.array(deviceSummarySchema),

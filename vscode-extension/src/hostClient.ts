@@ -62,6 +62,20 @@ export class LocalHostSessionClient {
     });
   }
 
+  async fetchEvents(lastSeq: number): Promise<SessionConsoleEvent[]> {
+    const response = await this.authorizedRequest(`/events?lastSeq=${encodeURIComponent(String(lastSeq))}`, {
+      method: "GET"
+    });
+    const body = (await response.json()) as unknown;
+    if (!Array.isArray(body)) {
+      return [];
+    }
+    return body.flatMap((event) => {
+      const parsed = parseEnvelopeEvent(event);
+      return parsed ? [parsed] : [];
+    });
+  }
+
   subscribe(input: {
     lastSeq: number;
     onEvent: (event: SessionConsoleEvent) => void;
@@ -70,7 +84,7 @@ export class LocalHostSessionClient {
     let closed = false;
     let socket: WebSocketLike | undefined;
 
-    const openStream = async (retryOnUnauthorized: boolean): Promise<void> => {
+    const openStream = async (retryOnUnauthorized: boolean, retryOnStreamFailure: boolean): Promise<void> => {
       try {
         const token = await this.ensureAccessToken();
         if (closed) {
@@ -84,7 +98,10 @@ export class LocalHostSessionClient {
             input.onEvent(event);
           }
         };
-        socket.onerror = () => input.onError?.("Host event stream failed");
+        let streamFailed = false;
+        socket.onerror = () => {
+          streamFailed = true;
+        };
         socket.onclose = (event) => {
           if (closed) {
             return;
@@ -92,7 +109,16 @@ export class LocalHostSessionClient {
           const close = event as WebSocketCloseLike;
           if (retryOnUnauthorized && (close.code === 1008 || close.reason === "Unauthorized")) {
             this.accessToken = undefined;
-            void openStream(false);
+            void openStream(false, retryOnStreamFailure);
+            return;
+          }
+          if (streamFailed && retryOnStreamFailure) {
+            this.accessToken = undefined;
+            void openStream(false, false);
+            return;
+          }
+          if (streamFailed) {
+            input.onError?.("Host event stream failed");
           }
         };
       } catch (error) {
@@ -100,7 +126,7 @@ export class LocalHostSessionClient {
       }
     };
 
-    void openStream(true);
+    void openStream(true, true);
 
     return () => {
       closed = true;
@@ -174,36 +200,40 @@ function createDefaultWebSocket(url: string): WebSocketLike {
 
 function parseConsoleEvent(data: unknown): SessionConsoleEvent | undefined {
   try {
-    const event = JSON.parse(String(data)) as Envelope;
-    if (!event.sessionId) {
-      return undefined;
-    }
-    const payload = event.payload as Record<string, unknown> | undefined;
-    if (event.type === "agent.output") {
-      return {
-        seq: event.seq,
-        sessionId: event.sessionId,
-        type: event.type,
-        text: typeof payload?.text === "string" ? payload.text : ""
-      };
-    }
-    if (event.type === "session.started" || event.type === "session.finished") {
-      return {
-        seq: event.seq,
-        sessionId: event.sessionId,
-        type: event.type,
-        text: event.type === "session.started" ? "Session started" : "Session finished"
-      };
-    }
-    return {
-      seq: event.seq,
-      sessionId: event.sessionId,
-      type: event.type,
-      text: event.type
-    };
+    return parseEnvelopeEvent(JSON.parse(String(data)) as Envelope);
   } catch {
     return undefined;
   }
+}
+
+function parseEnvelopeEvent(event: unknown): SessionConsoleEvent | undefined {
+  const envelope = event as Envelope | undefined;
+  if (!envelope?.sessionId) {
+    return undefined;
+  }
+  const payload = envelope.payload as Record<string, unknown> | undefined;
+  if (envelope.type === "agent.output" || envelope.type === "agent.input") {
+    return {
+      seq: envelope.seq,
+      sessionId: envelope.sessionId,
+      type: envelope.type,
+      text: typeof payload?.text === "string" ? payload.text : ""
+    };
+  }
+  if (envelope.type === "session.started" || envelope.type === "session.finished") {
+    return {
+      seq: envelope.seq,
+      sessionId: envelope.sessionId,
+      type: envelope.type,
+      text: envelope.type === "session.started" ? "Session started" : "Session finished"
+    };
+  }
+  return {
+    seq: envelope.seq,
+    sessionId: envelope.sessionId,
+    type: envelope.type,
+    text: envelope.type
+  };
 }
 
 async function readError(response: Response): Promise<string> {

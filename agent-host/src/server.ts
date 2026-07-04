@@ -35,7 +35,6 @@ export interface ServerOptions {
   version: string;
   lanEnabled: boolean;
   pairingToken: string;
-  pairingExpiresAt: Date;
   deviceName: string;
   advertisedHost?: string;
   port?: number;
@@ -44,9 +43,8 @@ export interface ServerOptions {
 
 export function buildServer(options: ServerOptions): FastifyInstance {
   const app = Fastify({ logger: false });
-  const accessTokens = new Map<string, { deviceId: string; expiresAt: Date }>();
+  const accessTokens = new Map<string, { deviceId: string }>();
   const devices = new Map<string, DeviceSummary>();
-  const accessTokenTtlMs = options.accessTokenTtlMs ?? 60 * 60 * 1000;
 
   app.register(websocket);
 
@@ -59,20 +57,18 @@ export function buildServer(options: ServerOptions): FastifyInstance {
 
   app.post("/pair", async (request, reply) => {
     const body = pairRequestSchema.safeParse(request.body);
-    if (!body.success || body.data.pairingToken !== options.pairingToken || options.pairingExpiresAt <= new Date()) {
-      return reply.code(401).send({ error: "Invalid or expired pairing token" });
+    if (!body.success || body.data.pairingToken !== options.pairingToken) {
+      return reply.code(401).send({ error: "Invalid pairing token" });
     }
 
     const accessToken = `access_${nanoid(32)}`;
-    const expiresAt = new Date(Date.now() + accessTokenTtlMs);
-    accessTokens.set(accessToken, { deviceId: body.data.deviceId, expiresAt });
+    accessTokens.set(accessToken, { deviceId: body.data.deviceId });
     devices.set(body.data.deviceId, {
       deviceId: body.data.deviceId,
       clientType: body.data.clientType ?? "android-app",
-      pairedAt: new Date().toISOString(),
-      accessTokenExpiresAt: expiresAt.toISOString()
+      pairedAt: new Date().toISOString()
     });
-    return { accessToken, expiresAt: expiresAt.toISOString() };
+    return { accessToken };
   });
 
   app.addHook("preHandler", async (request, reply) => {
@@ -96,8 +92,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
       host: options.advertisedHost ?? "127.0.0.1",
       port: options.port ?? 17365,
       pairingToken: options.pairingToken,
-      deviceName: options.deviceName,
-      expiresAt: options.pairingExpiresAt.toISOString()
+      deviceName: options.deviceName
     };
     return {
       server: {
@@ -109,8 +104,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
         version: options.version
       },
       pairing: {
-        enabled: options.pairingExpiresAt > new Date(),
-        expiresAt: options.pairingExpiresAt.toISOString(),
+        enabled: true,
         pairingPayload
       },
       devices: Array.from(devices.values()),
@@ -147,6 +141,13 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     return options.manager.listSessions();
   });
 
+  app.get("/events", async (request) => {
+    const lastSeq = Number(
+      Array.isArray(request.query) ? 0 : (request.query as Record<string, string | undefined>).lastSeq ?? 0
+    );
+    return options.manager.eventsAfter(Number.isFinite(lastSeq) ? lastSeq : 0);
+  });
+
   app.post("/sessions", async (_request, reply) =>
     reply.code(409).send({ error: "Start Codex sessions on the desktop first" })
   );
@@ -154,6 +155,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
   app.post("/sessions/:id/input", async (request, reply) => {
     const params = z.object({ id: z.string() }).parse(request.params);
     const body = inputRequestSchema.parse(request.body);
+    await options.manager.syncDesktopSessions();
     try {
       await options.manager.sendInput(params.id, body.text);
       return reply.code(202).send({ ok: true });
@@ -167,6 +169,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
 
   app.post("/sessions/:id/attach", async (request, reply) => {
     const params = z.object({ id: z.string() }).parse(request.params);
+    await options.manager.syncDesktopSessions();
     try {
       await options.manager.attachSession(params.id);
       return reply.code(202).send({ ok: true });
@@ -181,6 +184,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
   app.post("/sessions/:id/control", async (request, reply) => {
     const params = z.object({ id: z.string() }).parse(request.params);
     const body = controlRequestSchema.parse(request.body);
+    await options.manager.syncDesktopSessions();
     try {
       if (body.command === "stop") {
         await options.manager.stopSession(params.id);
@@ -194,28 +198,26 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     }
   });
 
-  app.get("/stream", { websocket: true }, (socket, request) => {
-    const token = Array.isArray(request.query)
-      ? undefined
-      : (request.query as Record<string, string | undefined>).token;
-    const lastSeq = Number(
-      Array.isArray(request.query) ? 0 : (request.query as Record<string, string | undefined>).lastSeq ?? 0
-    );
-    if (!token || !isAccessTokenValid(token, accessTokens, devices)) {
-      socket.close(1008, "Unauthorized");
-      return;
-    }
-    for (const event of options.manager.eventsAfter(Number.isFinite(lastSeq) ? lastSeq : 0)) {
-      socket.send(JSON.stringify(event));
-    }
-    const unsubscribe = options.manager.subscribe((event) => {
-      try {
-        socket.send(JSON.stringify(event));
-      } catch {
-        unsubscribe();
+  app.after(() => {
+    app.get("/stream", { websocket: true }, (socket, request) => {
+      const token = getQueryParam(request, "token");
+      const lastSeq = Number(getQueryParam(request, "lastSeq") ?? 0);
+      if (!token || !isAccessTokenValid(token, accessTokens, devices)) {
+        socket.close(1008, "Unauthorized");
+        return;
       }
+      for (const event of options.manager.eventsAfter(Number.isFinite(lastSeq) ? lastSeq : 0)) {
+        socket.send(JSON.stringify(event));
+      }
+      const unsubscribe = options.manager.subscribe((event) => {
+        try {
+          socket.send(JSON.stringify(event));
+        } catch {
+          unsubscribe();
+        }
+      });
+      socket.on("close", unsubscribe);
     });
-    socket.on("close", unsubscribe);
   });
 
   return app;
@@ -249,7 +251,7 @@ function buildAgentSummary(
 
 function isAuthorized(
   request: FastifyRequest,
-  accessTokens: Map<string, { deviceId: string; expiresAt: Date }>,
+  accessTokens: Map<string, { deviceId: string }>,
   devices: Map<string, DeviceSummary>
 ): boolean {
   const header = request.headers.authorization;
@@ -261,7 +263,7 @@ function isAuthorized(
 
 function isAccessTokenValid(
   token: string,
-  accessTokens: Map<string, { deviceId: string; expiresAt: Date }>,
+  accessTokens: Map<string, { deviceId: string }>,
   devices: Map<string, DeviceSummary>
 ): boolean {
   const record = accessTokens.get(token);
@@ -272,9 +274,14 @@ function isAccessTokenValid(
     accessTokens.delete(token);
     return false;
   }
-  if (record.expiresAt <= new Date()) {
-    accessTokens.delete(token);
-    return false;
-  }
   return true;
+}
+
+function getQueryParam(request: FastifyRequest, name: string): string | undefined {
+  const query = request.query;
+  if (query && !Array.isArray(query)) {
+    const value = (query as Record<string, string | string[] | undefined>)[name];
+    return Array.isArray(value) ? value[0] : value;
+  }
+  return new URL(request.url, "http://agent-mobile.local").searchParams.get(name) ?? undefined;
 }

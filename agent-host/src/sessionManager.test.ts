@@ -170,6 +170,7 @@ describe("SessionManager", () => {
       expect.objectContaining({
         id: "codex_thr_desktop",
         adapterId: "codex",
+        title: "Desktop thread",
         workspace: "E:/repo",
         status: "running"
       })
@@ -241,5 +242,37 @@ describe("SessionManager", () => {
         payload: { text: "previous answer" }
       })
     ]);
+  });
+
+  it("reopens a stopped desktop Codex thread when discovery still reports it", async () => {
+    const stoppedProcess = { sendInput: vi.fn(), stop: vi.fn(async () => 0) };
+    const reattachedProcess = { sendInput: vi.fn(), stop: vi.fn(async () => 0) };
+    const adapter: AgentAdapter = {
+      id: "codex",
+      displayName: "Codex",
+      start: vi.fn(async () => stoppedProcess),
+      discoverSessions: vi.fn(async () => [
+        {
+          id: "thr_desktop",
+          workspace: "E:/repo",
+          title: "Desktop thread",
+          updatedAt: "2026-07-02T20:00:00.000Z"
+        }
+      ]),
+      attachSession: vi.fn()
+        .mockResolvedValueOnce(stoppedProcess)
+        .mockResolvedValueOnce(reattachedProcess)
+    };
+    const manager = new SessionManager({ adapter, eventCacheSize: 10, workspace: "E:/repo" });
+
+    await manager.syncDesktopSessions();
+    await manager.attachSession("codex_thr_desktop");
+    await manager.stopSession("codex_thr_desktop");
+    await manager.syncDesktopSessions();
+    await manager.sendInput("codex_thr_desktop", "from phone");
+
+    expect(manager.listSessions()[0].status).toBe("running");
+    expect(adapter.attachSession).toHaveBeenCalledTimes(2);
+    expect(reattachedProcess.sendInput).toHaveBeenCalledWith("from phone\n");
   });
 });

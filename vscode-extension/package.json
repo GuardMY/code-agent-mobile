@@ -72,5 +72,6 @@
     "@vscode/vsce": "^3.6.2",
     "esbuild": "^0.25.9",
     "vitest": "^3.2.4"
-  }
+  },
+  "license": "Apache-2.0"
 }

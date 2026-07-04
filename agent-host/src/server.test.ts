@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import WebSocket from "ws";
 import type { ApprovalRequest, DeviceSummary, SessionSummary } from "@agent-mobile/protocol";
 import { buildServer } from "./server.js";
 import { SessionManager, type AgentAdapter, type SessionStorage } from "./sessions/sessionManager.js";
@@ -12,21 +13,20 @@ const adapter: AgentAdapter = {
   })
 };
 
-function createTestContext(input: { pairingExpiresAt?: Date; storage?: SessionStorage; accessTokenTtlMs?: number } = {}) {
+function createTestContext(input: { storage?: SessionStorage; accessTokenTtlMs?: number } = {}) {
   const manager = new SessionManager({ adapter, eventCacheSize: 10, workspace: "E:/repo", storage: input.storage });
   const app = buildServer({
     manager,
     version: "0.1.0",
     lanEnabled: true,
     pairingToken: "pairing-token-123",
-    pairingExpiresAt: input.pairingExpiresAt ?? new Date(Date.now() + 300_000),
     deviceName: "devbox",
     accessTokenTtlMs: input.accessTokenTtlMs
   });
   return { app, manager };
 }
 
-function createTestServer(input: { pairingExpiresAt?: Date; storage?: SessionStorage; accessTokenTtlMs?: number } = {}) {
+function createTestServer(input: { storage?: SessionStorage; accessTokenTtlMs?: number } = {}) {
   return createTestContext(input).app;
 }
 
@@ -82,7 +82,20 @@ describe("agent host server", () => {
     expect(response.statusCode).toBe(401);
   });
 
-  it("rejects access tokens after they expire", async () => {
+  it("keeps pairing available without a pairing expiry time", async () => {
+    const app = createTestServer();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/pair",
+      payload: { pairingToken: "pairing-token-123", deviceId: "android_1" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().accessToken).toMatch(/^access_/);
+  });
+
+  it("keeps paired access tokens valid until the device is revoked", async () => {
     const app = createTestServer({ accessTokenTtlMs: 0 });
     const token = await pair(app);
 
@@ -92,7 +105,7 @@ describe("agent host server", () => {
       headers: { authorization: `Bearer ${token}` }
     });
 
-    expect(response.statusCode).toBe(401);
+    expect(response.statusCode).toBe(200);
   });
 
   it("returns conflict when sending input to a restored non-running session", async () => {
@@ -137,6 +150,7 @@ describe("agent host server", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject([{ deviceId: "android_1", clientType: "android-app" }]);
     expect(JSON.stringify(response.json())).not.toContain("access_");
+    expect(JSON.stringify(response.json())).not.toContain("accessTokenExpiresAt");
   });
 
   it("records WeChat mini program clients during pairing", async () => {
@@ -218,7 +232,6 @@ describe("agent host server", () => {
       version: "0.1.0",
       lanEnabled: true,
       pairingToken: "pairing-token-123",
-      pairingExpiresAt: new Date(Date.now() + 300_000),
       deviceName: "devbox"
     });
     const token = await pair(app);
@@ -250,6 +263,7 @@ describe("agent host server", () => {
         {
           id: "thr_desktop",
           workspace: "E:/repo",
+          title: "Desktop thread",
           updatedAt: "2026-07-02T20:00:00.000Z"
         }
       ]),
@@ -261,7 +275,6 @@ describe("agent host server", () => {
       version: "0.1.0",
       lanEnabled: true,
       pairingToken: "pairing-token-123",
-      pairingExpiresAt: new Date(Date.now() + 300_000),
       deviceName: "devbox"
     });
     const token = await pair(app);
@@ -277,6 +290,7 @@ describe("agent host server", () => {
       expect.objectContaining({
         id: "codex_thr_desktop",
         adapterId: "codex",
+        title: "Desktop thread",
         status: "running"
       })
     ]);
@@ -323,7 +337,6 @@ describe("agent host server", () => {
       version: "0.1.0",
       lanEnabled: true,
       pairingToken: "pairing-token-123",
-      pairingExpiresAt: new Date(Date.now() + 300_000),
       deviceName: "devbox"
     });
     const token = await pair(app);
@@ -354,6 +367,104 @@ describe("agent host server", () => {
         type: "agent.output",
         sessionId: "codex_thr_desktop",
         payload: { text: "history" }
+      })
+    ]);
+  });
+
+  it("syncs desktop Codex sessions before attaching by id", async () => {
+    const process = {
+      sendInput: vi.fn(),
+      stop: vi.fn(async () => 0)
+    };
+    const desktopAdapter: AgentAdapter = {
+      id: "codex",
+      displayName: "Codex",
+      start: vi.fn(async () => process),
+      discoverSessions: vi.fn(async () => [
+        {
+          id: "thr_desktop",
+          workspace: "E:/repo",
+          updatedAt: "2026-07-02T20:00:00.000Z"
+        }
+      ]),
+      attachSession: vi.fn(async () => process)
+    };
+    const manager = new SessionManager({ adapter: desktopAdapter, eventCacheSize: 10, workspace: "E:/repo" });
+    const app = buildServer({
+      manager,
+      version: "0.1.0",
+      lanEnabled: true,
+      pairingToken: "pairing-token-123",
+      deviceName: "devbox"
+    });
+    const token = await pair(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/sessions/codex_thr_desktop/attach",
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(desktopAdapter.attachSession).toHaveBeenCalledWith(expect.objectContaining({ externalId: "thr_desktop" }));
+  });
+
+  it("returns cached session events over HTTP after a sequence number", async () => {
+    const { app, manager } = createTestContext();
+    const token = await pair(app);
+    await manager.createSession();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/events?lastSeq=0",
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([
+      expect.objectContaining({
+        seq: 1,
+        type: "session.started",
+        sessionId: expect.any(String)
+      })
+    ]);
+  });
+
+  it("upgrades stream websocket connections and replays cached events", async () => {
+    const { app, manager } = createTestContext();
+    const token = await pair(app);
+    await manager.createSession();
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    const address = app.server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected a TCP test address");
+    }
+
+    const received = await new Promise<unknown[]>((resolve, reject) => {
+      const messages: unknown[] = [];
+      const socket = new WebSocket(`ws://127.0.0.1:${address.port}/stream?token=${token}&lastSeq=0`);
+      const timeout = setTimeout(() => {
+        socket.close();
+        reject(new Error("Timed out waiting for stream replay"));
+      }, 1_000);
+      socket.on("message", (data) => {
+        messages.push(JSON.parse(data.toString()));
+        clearTimeout(timeout);
+        socket.close();
+        resolve(messages);
+      });
+      socket.on("error", (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+    });
+    await app.close();
+
+    expect(received).toEqual([
+      expect.objectContaining({
+        seq: 1,
+        type: "session.started",
+        sessionId: expect.any(String)
       })
     ]);
   });

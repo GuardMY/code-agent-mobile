@@ -4,8 +4,7 @@ data class PairingPayload(
     val host: String,
     val port: Int,
     val pairingToken: String,
-    val deviceName: String,
-    val expiresAt: String
+    val deviceName: String
 )
 
 data class ConnectionInfo(
@@ -20,15 +19,36 @@ data class ConnectionInfo(
 data class SessionSummary(
     val id: String,
     val adapterId: String,
+    val title: String? = null,
     val workspace: String,
     val status: String,
     val startedAt: String,
     val lastSeq: Long
 )
 
+data class AgentCapabilitySummary(
+    val id: String,
+    val displayName: String,
+    val availability: String,
+    val activeSessions: Int,
+    val latestSessionStatus: String?
+)
+
+data class HostDashboardStatus(
+    val agents: List<AgentCapabilitySummary>,
+    val sessions: List<SessionSummary>
+)
+
+enum class ConsoleLineRole {
+    AGENT,
+    USER
+}
+
 data class ConsoleLine(
     val seq: Long,
-    val text: String
+    val text: String,
+    val role: ConsoleLineRole = ConsoleLineRole.AGENT,
+    val sessionId: String? = null
 )
 
 data class ApprovalRequest(
@@ -45,6 +65,5 @@ data class ApprovalRequest(
 data class DeviceSummary(
     val deviceId: String,
     val pairedAt: String,
-    val accessTokenExpiresAt: String,
     val revokedAt: String?
 )

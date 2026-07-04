@@ -12,8 +12,7 @@ class PairingParserTest {
               "host": "192.168.1.10",
               "port": 17365,
               "pairingToken": "pairing-token-123",
-              "deviceName": "VS Code",
-              "expiresAt": "2026-06-30T14:30:00.000Z"
+              "deviceName": "VS Code"
             }
             """.trimIndent()
         )
@@ -31,8 +30,7 @@ class PairingParserTest {
               "host": "192.168.1.10",
               "port": 70000,
               "pairingToken": "pairing-token-123",
-              "deviceName": "VS Code",
-              "expiresAt": "2026-06-30T14:30:00.000Z"
+              "deviceName": "VS Code"
             }
             """.trimIndent()
         )

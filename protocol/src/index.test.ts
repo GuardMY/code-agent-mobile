@@ -8,7 +8,8 @@ import {
   deviceSummarySchema,
   envelopeSchema,
   hostDashboardStatusSchema,
-  pairingPayloadSchema
+  pairingPayloadSchema,
+  sessionSummarySchema
 } from "./index.js";
 
 describe("protocol schemas", () => {
@@ -44,30 +45,29 @@ describe("protocol schemas", () => {
     expect(result.success).toBe(false);
   });
 
-  it("rejects expired pairing payloads", () => {
+  it("accepts pairing payloads without expiry", () => {
     const result = pairingPayloadSchema.safeParse({
       host: "192.168.1.10",
       port: 17365,
       pairingToken: "pair_123",
-      deviceName: "devbox",
-      expiresAt: "2020-01-01T00:00:00.000Z"
+      deviceName: "devbox"
     });
 
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
-  it("accepts device summaries without exposing access tokens", () => {
+  it("accepts permanent device summaries without token expiry metadata", () => {
     const result = deviceSummarySchema.parse({
       deviceId: "android_1",
       clientType: "android-app",
       pairedAt: "2026-06-30T14:30:00.000Z",
-      accessTokenExpiresAt: "2026-06-30T15:30:00.000Z",
       revokedAt: "2026-06-30T15:00:00.000Z"
     });
 
     expect(result.deviceId).toBe("android_1");
     expect(result.clientType).toBe("android-app");
     expect("accessToken" in result).toBe(false);
+    expect("accessTokenExpiresAt" in result).toBe(false);
   });
 
   it("accepts supported mobile client types", () => {
@@ -87,8 +87,21 @@ describe("protocol schemas", () => {
     expect(result.activeSessions).toBe(1);
   });
 
+  it("accepts optional session titles", () => {
+    const result = sessionSummarySchema.parse({
+      id: "codex_thr_desktop",
+      adapterId: "codex",
+      title: "Fix mobile handoff",
+      workspace: "E:/repo",
+      status: "running",
+      startedAt: "2026-07-02T20:00:00.000Z",
+      lastSeq: 7
+    });
+
+    expect(result.title).toBe("Fix mobile handoff");
+  });
+
   it("accepts host dashboard status snapshots", () => {
-    const expiresAt = new Date(Date.now() + 300_000).toISOString();
     const result = hostDashboardStatusSchema.parse({
       server: {
         running: true,
@@ -100,21 +113,18 @@ describe("protocol schemas", () => {
       },
       pairing: {
         enabled: true,
-        expiresAt,
         pairingPayload: {
           host: "127.0.0.1",
           port: 17365,
           pairingToken: "pairing-token-123",
-          deviceName: "VS Code",
-          expiresAt
+          deviceName: "VS Code"
         }
       },
       devices: [
         {
           deviceId: "wechat_1",
           clientType: "wechat-mini-program",
-          pairedAt: "2026-06-30T14:30:00.000Z",
-          accessTokenExpiresAt: "2026-06-30T15:30:00.000Z"
+          pairedAt: "2026-06-30T14:30:00.000Z"
         }
       ],
       agents: [

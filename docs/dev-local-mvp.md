@@ -29,7 +29,7 @@ npm run build
 npm run dev:host -- --host 127.0.0.1 --port 17365 --workspace E:\Code\code-agent-mobile --pairing-token pairing-token-123
 ```
 
-The host prints a JSON ready message containing the advertised host, port, pairing token, and expiry.
+The host prints a JSON ready message containing the advertised host, port, and pairing token. Paired access tokens remain valid until the desktop extension or mobile app unpairs the device.
 
 ## VS Code Extension Debug Flow
 
@@ -87,11 +87,11 @@ gradle wrapper --gradle-version 8.10.2
 5. Put the phone and development machine on the same Wi-Fi.
 6. In VS Code, enable LAN pairing.
 7. In Android, scan the QR code or paste the pairing JSON.
-8. Create a session, send a prompt, and watch output stream into the console.
+8. Select a desktop Codex session, send a prompt, and watch output stream into the console.
 
 ## Current MVP Limits
 
-- Tokens and sessions are in memory and disappear when Agent Host restarts.
+- Paired devices and sessions are in memory and disappear when Agent Host restarts.
 - Only Codex is wired as a real adapter.
 - Codex output is treated as PTY text, not structured tool-call events.
 - Public Relay, account login, push notifications, durable device authorization, and end-to-end encryption are intentionally out of scope for this MVP.

@@ -2,7 +2,11 @@ package com.agentmobile.app.net
 
 import com.agentmobile.app.model.ApprovalRequest
 import com.agentmobile.app.model.ConnectionInfo
+import com.agentmobile.app.model.ConsoleLine
+import com.agentmobile.app.model.ConsoleLineRole
 import com.agentmobile.app.model.DeviceSummary
+import com.agentmobile.app.model.AgentCapabilitySummary
+import com.agentmobile.app.model.HostDashboardStatus
 import com.agentmobile.app.model.SessionSummary
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -15,8 +19,11 @@ import org.json.JSONObject
 
 interface AgentMobileApi {
     fun pair(host: String, port: Int, pairingToken: String, deviceId: String): ConnectionInfo
+    fun getStatus(connection: ConnectionInfo): HostDashboardStatus
     fun listSessions(connection: ConnectionInfo): List<SessionSummary>
+    fun listEvents(connection: ConnectionInfo, lastSeq: Long): List<ConsoleLine>
     fun createSession(connection: ConnectionInfo): SessionSummary
+    fun attachSession(connection: ConnectionInfo, sessionId: String)
     fun sendInput(connection: ConnectionInfo, sessionId: String, text: String)
     fun stopSession(connection: ConnectionInfo, sessionId: String)
     fun listApprovals(connection: ConnectionInfo): List<ApprovalRequest>
@@ -47,6 +54,20 @@ class AgentMobileClient(
         }
     }
 
+    override fun getStatus(connection: ConnectionInfo): HostDashboardStatus {
+        val request = authorized(connection, "/status").get().build()
+        http.newCall(request).execute().use { response ->
+            check(response.isSuccessful) { "Get status failed: ${response.code}" }
+            val body = JSONObject(response.body!!.string())
+            val agents = body.getJSONArray("agents")
+            val sessions = body.getJSONArray("sessions")
+            return HostDashboardStatus(
+                agents = (0 until agents.length()).map { index -> parseAgent(agents.getJSONObject(index)) },
+                sessions = (0 until sessions.length()).map { index -> parseSession(sessions.getJSONObject(index)) }
+            )
+        }
+    }
+
     override fun listSessions(connection: ConnectionInfo): List<SessionSummary> {
         val request = authorized(connection, "/sessions").get().build()
         http.newCall(request).execute().use { response ->
@@ -54,14 +75,18 @@ class AgentMobileClient(
             val items = JSONArray(response.body!!.string())
             return (0 until items.length()).map { index ->
                 val item = items.getJSONObject(index)
-                SessionSummary(
-                    id = item.getString("id"),
-                    adapterId = item.getString("adapterId"),
-                    workspace = item.getString("workspace"),
-                    status = item.getString("status"),
-                    startedAt = item.getString("startedAt"),
-                    lastSeq = item.getLong("lastSeq")
-                )
+                parseSession(item)
+            }
+        }
+    }
+
+    override fun listEvents(connection: ConnectionInfo, lastSeq: Long): List<ConsoleLine> {
+        val request = authorized(connection, "/events?lastSeq=$lastSeq").get().build()
+        http.newCall(request).execute().use { response ->
+            check(response.isSuccessful) { "List events failed: ${response.code}" }
+            val items = JSONArray(response.body!!.string())
+            return (0 until items.length()).mapNotNull { index ->
+                parseConsoleLine(items.getJSONObject(index))
             }
         }
     }
@@ -71,14 +96,16 @@ class AgentMobileClient(
         http.newCall(request).execute().use { response ->
             check(response.isSuccessful) { "Create session failed: ${response.code}" }
             val item = JSONObject(response.body!!.string())
-            return SessionSummary(
-                id = item.getString("id"),
-                adapterId = item.getString("adapterId"),
-                workspace = item.getString("workspace"),
-                status = item.getString("status"),
-                startedAt = item.getString("startedAt"),
-                lastSeq = item.getLong("lastSeq")
-            )
+            return parseSession(item)
+        }
+    }
+
+    override fun attachSession(connection: ConnectionInfo, sessionId: String) {
+        val request = authorized(connection, "/sessions/$sessionId/attach")
+            .post("{}".toRequestBody(jsonType))
+            .build()
+        http.newCall(request).execute().use { response ->
+            check(response.isSuccessful) { "Attach session failed: ${response.code}" }
         }
     }
 
@@ -131,7 +158,6 @@ class AgentMobileClient(
                 DeviceSummary(
                     deviceId = item.getString("deviceId"),
                     pairedAt = item.getString("pairedAt"),
-                    accessTokenExpiresAt = item.getString("accessTokenExpiresAt"),
                     revokedAt = item.optString("revokedAt").ifBlank { null }
                 )
             }
@@ -158,6 +184,38 @@ class AgentMobileClient(
         Request.Builder()
             .url("http://${connection.host}:${connection.port}$path")
             .header("Authorization", "Bearer ${connection.accessToken}")
+
+    private fun parseSession(item: JSONObject): SessionSummary =
+        SessionSummary(
+            id = item.getString("id"),
+            adapterId = item.getString("adapterId"),
+            title = item.optString("title").ifBlank { null },
+            workspace = item.getString("workspace"),
+            status = item.getString("status"),
+            startedAt = item.getString("startedAt"),
+            lastSeq = item.getLong("lastSeq")
+        )
+
+    private fun parseAgent(item: JSONObject): AgentCapabilitySummary =
+        AgentCapabilitySummary(
+            id = item.getString("id"),
+            displayName = item.getString("displayName"),
+            availability = item.getString("availability"),
+            activeSessions = item.getInt("activeSessions"),
+            latestSessionStatus = item.optString("latestSessionStatus").ifBlank { null }
+        )
+
+    private fun parseConsoleLine(item: JSONObject): ConsoleLine? {
+        if (item.getString("type") != "agent.output") {
+            return null
+        }
+        return ConsoleLine(
+            seq = item.getLong("seq"),
+            text = item.getJSONObject("payload").getString("text"),
+            role = ConsoleLineRole.AGENT,
+            sessionId = item.optString("sessionId").ifBlank { null }
+        )
+    }
 
     private fun parseApproval(item: JSONObject): ApprovalRequest =
         ApprovalRequest(

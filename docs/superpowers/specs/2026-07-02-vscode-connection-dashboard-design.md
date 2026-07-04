@@ -53,7 +53,6 @@ type HostDashboardStatus = {
   };
   pairing: {
     enabled: boolean;
-    expiresAt: string;
     pairingPayload: PairingPayload;
   };
   devices: DeviceSummary[];

@@ -1,6 +1,8 @@
-import type { AgentCapabilitySummary, ClientType, DeviceSummary, SessionSummary } from "@agent-mobile/protocol";
+﻿import type { AgentCapabilitySummary, ClientType, DeviceSummary, SessionSummary } from "@agent-mobile/protocol";
 import type { DashboardFetchResult } from "./hostController.js";
 import type { SessionConsoleEvent } from "./hostClient.js";
+
+const SESSION_TITLE_MAX_LENGTH = 44;
 
 export async function renderPairingHtml(input: {
   status: "stopped" | "starting" | "running";
@@ -71,6 +73,13 @@ export async function renderPairingHtml(input: {
       display: grid;
       gap: 8px;
     }
+    .session-list {
+      display: grid;
+      gap: 8px;
+      max-height: 280px;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
     .row {
       display: flex;
       justify-content: space-between;
@@ -82,7 +91,10 @@ export async function renderPairingHtml(input: {
       background: var(--vscode-sideBar-background);
     }
     .session-row {
+      display: grid;
+      gap: 4px;
       width: 100%;
+      padding: 8px;
       color: var(--vscode-foreground);
       text-align: left;
       background: var(--vscode-sideBar-background);
@@ -122,7 +134,7 @@ export async function renderPairingHtml(input: {
     }
     .output {
       display: grid;
-      gap: 6px;
+      gap: 10px;
       min-height: 120px;
       max-height: 320px;
       overflow: auto;
@@ -131,12 +143,64 @@ export async function renderPairingHtml(input: {
       border-radius: 6px;
       background: var(--vscode-editor-inactiveSelectionBackground);
     }
-    .event {
+    .message {
       display: grid;
-      gap: 2px;
-      white-space: pre-wrap;
+      gap: 4px;
+      width: min(88%, 520px);
+      padding: 8px 10px;
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 8px;
       word-break: break-word;
       font-size: 12px;
+    }
+    .agent-message {
+      justify-self: start;
+      border-bottom-left-radius: 3px;
+      background: var(--vscode-sideBar-background);
+    }
+    .user-message {
+      justify-self: end;
+      border-bottom-right-radius: 3px;
+      background: var(--vscode-list-activeSelectionBackground);
+      color: var(--vscode-list-activeSelectionForeground);
+    }
+    .message-body {
+      display: grid;
+      gap: 6px;
+    }
+    .message-body p,
+    .message-body ul,
+    .message-body pre,
+    .message-body h1,
+    .message-body h2,
+    .message-body h3 {
+      margin: 0;
+    }
+    .message-body ul {
+      padding-left: 18px;
+    }
+    .message-body h1 {
+      font-size: 16px;
+      color: inherit;
+      text-transform: none;
+    }
+    .message-body h2,
+    .message-body h3 {
+      font-size: 14px;
+      color: inherit;
+      text-transform: none;
+    }
+    .message-body code {
+      font-family: var(--vscode-editor-font-family);
+      background: var(--vscode-textCodeBlock-background);
+      padding: 1px 3px;
+      border-radius: 3px;
+    }
+    .message-body pre {
+      padding: 8px;
+      background: var(--vscode-textCodeBlock-background);
+      border-radius: 6px;
+      white-space: pre-wrap;
     }
     .actions {
       display: grid;
@@ -258,7 +322,7 @@ function renderDashboard(input: {
     </section>`,
     `<section class="section">
       <h3>Codex 会话</h3>
-      <div class="grid">${renderSessions(status.sessions, input.selectedSessionId)}</div>
+      <div class="session-list">${renderSessions(status.sessions, input.selectedSessionId)}</div>
     </section>`,
     renderSessionConsole(status.sessions, input.selectedSessionId, input.sessionEvents ?? [], input.consoleError)
   ].join("");
@@ -274,9 +338,9 @@ function renderDevices(devices: DeviceSummary[]): string {
         <div>
           <div class="label">${clientTypeLabel(device.clientType)} ${escapeHtml(device.deviceId)}</div>
           <div class="muted">配对时间：${escapeHtml(device.pairedAt)}</div>
-          <div class="muted">令牌过期：${escapeHtml(device.accessTokenExpiresAt)}</div>
+          <div class="muted">长期有效，直到桌面端或移动端解绑。</div>
         </div>
-        <span class="pill">${device.revokedAt ? "已撤销" : "活跃"}</span>
+        <span class="pill">${device.revokedAt ? "已解绑" : "活跃"}</span>
       </div>`
     )
     .join("");
@@ -289,18 +353,40 @@ function renderSessions(sessions: SessionSummary[], selectedSessionId?: string):
   return sessions
     .map((session) => {
       const selected = session.id === selectedSessionId;
-      return `<button class="session-row${selected ? " selected" : ""}" data-command="selectSession" data-session-id="${escapeHtml(session.id)}">
-        <div class="row">
-          <div>
-            <div class="label">${escapeHtml(session.id)}</div>
-            <div class="muted">${escapeHtml(session.adapterId)} / ${escapeHtml(session.status)} / seq ${session.lastSeq}</div>
-            <div class="muted">${escapeHtml(session.workspace)}</div>
-          </div>
-          <span class="pill">${escapeHtml(sessionStatusLabel(session.status))}</span>
-        </div>
+      const title = session.title ?? session.id;
+      const displayTitle = truncateSessionTitle(title);
+      return `<button class="session-row${selected ? " selected" : ""}" data-command="selectSession" data-session-id="${escapeHtml(session.id)}" title="${escapeHtml(title)}">
+        <div class="label">${escapeHtml(displayTitle)}</div>
+        <div class="muted">${escapeHtml(formatSessionTime(session.startedAt))}</div>
       </button>`;
     })
     .join("");
+}
+
+function truncateSessionTitle(title: string): string {
+  if (title.length <= SESSION_TITLE_MAX_LENGTH) {
+    return title;
+  }
+  return `${title.slice(0, SESSION_TITLE_MAX_LENGTH - 3).trimEnd()}...`;
+}
+
+function formatSessionTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}`;
 }
 
 function renderSessionConsole(
@@ -314,21 +400,17 @@ function renderSessionConsole(
   if (!selected) {
     return `<section class="section"><h3>会话详情</h3><p class="muted">选择一个 Codex 会话后查看输出并发送输入。</p></section>`;
   }
+  const title = selected.title ?? selected.id;
   return `<section class="section console">
     <h3>会话详情</h3>
-    <div class="muted">${escapeHtml(selected.id)} / ${escapeHtml(selected.status)}</div>
+    <div class="label">${escapeHtml(title)}</div>
     ${consoleError ? `<p class="danger">${escapeHtml(consoleError)}</p>` : ""}
     <div class="output">
       ${
         selectedEvents.length === 0
           ? `<p class="muted">暂无输出。刷新或发送一条输入后会显示流式结果。</p>`
           : selectedEvents
-              .map(
-                (event) => `<div class="event">
-                  <div class="muted">#${event.seq} ${escapeHtml(event.type)}</div>
-                  <div>${escapeHtml(event.text)}</div>
-                </div>`
-              )
+              .map(renderSessionEvent)
               .join("")
       }
     </div>
@@ -341,6 +423,120 @@ function renderSessionConsole(
       <button data-command="refreshSessions" class="secondary">刷新会话</button>
     </div>
   </section>`;
+}
+
+function renderSessionEvent(event: SessionConsoleEvent): string {
+  const isUser = event.type === "agent.input";
+  const label = isUser ? "User" : "Agent";
+  const seqLabel = event.seq > 0 ? `#${event.seq}` : "local";
+  return `<div class="message ${isUser ? "user-message" : "agent-message"}">
+    <div class="muted">${seqLabel} ${label}</div>
+    <div class="message-body">${renderMarkdown(event.text)}</div>
+  </div>`;
+}
+
+function renderMarkdown(value: string): string {
+  const blocks: string[] = [];
+  const paragraph: string[] = [];
+  const listItems: string[] = [];
+  const codeLines: string[] = [];
+  let inCode = false;
+
+  const flushParagraph = () => {
+    if (paragraph.length > 0) {
+      blocks.push(`<p>${renderInlineMarkdown(paragraph.join("\n"))}</p>`);
+      paragraph.length = 0;
+    }
+  };
+  const flushList = () => {
+    if (listItems.length > 0) {
+      blocks.push(`<ul>${listItems.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join("")}</ul>`);
+      listItems.length = 0;
+    }
+  };
+
+  for (const rawLine of value.split(/\r?\n/)) {
+    const line = rawLine.trimEnd();
+    if (line.trim() === "```") {
+      if (inCode) {
+        blocks.push(`<pre><code>${escapeHtml(codeLines.join("\n").trimEnd())}</code></pre>`);
+        codeLines.length = 0;
+        inCode = false;
+      } else {
+        flushParagraph();
+        flushList();
+        inCode = true;
+      }
+      continue;
+    }
+    if (inCode) {
+      codeLines.push(rawLine);
+      continue;
+    }
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushParagraph();
+      flushList();
+    } else if (trimmed.startsWith("### ")) {
+      flushParagraph();
+      flushList();
+      blocks.push(`<h3>${renderInlineMarkdown(trimmed.slice(4).trim())}</h3>`);
+    } else if (trimmed.startsWith("## ")) {
+      flushParagraph();
+      flushList();
+      blocks.push(`<h2>${renderInlineMarkdown(trimmed.slice(3).trim())}</h2>`);
+    } else if (trimmed.startsWith("# ")) {
+      flushParagraph();
+      flushList();
+      blocks.push(`<h1>${renderInlineMarkdown(trimmed.slice(2).trim())}</h1>`);
+    } else if (trimmed.startsWith("- ")) {
+      flushParagraph();
+      listItems.push(trimmed.slice(2).trim());
+    } else {
+      flushList();
+      paragraph.push(trimmed);
+    }
+  }
+  if (inCode) {
+    blocks.push(`<pre><code>${escapeHtml(codeLines.join("\n").trimEnd())}</code></pre>`);
+  }
+  flushParagraph();
+  flushList();
+  return blocks.join("");
+}
+
+function renderInlineMarkdown(value: string): string {
+  let result = "";
+  let index = 0;
+  while (index < value.length) {
+    const boldStart = value.indexOf("**", index);
+    const codeStart = value.indexOf("`", index);
+    const starts = [boldStart, codeStart].filter((item) => item >= 0);
+    const nextStart = starts.length > 0 ? Math.min(...starts) : -1;
+    if (nextStart < 0) {
+      result += escapeHtml(value.slice(index));
+      break;
+    }
+    result += escapeHtml(value.slice(index, nextStart));
+    if (nextStart === boldStart) {
+      const end = value.indexOf("**", boldStart + 2);
+      if (end < 0) {
+        result += escapeHtml(value.slice(boldStart));
+        break;
+      }
+      result += `<strong>${escapeHtml(value.slice(boldStart + 2, end))}</strong>`;
+      index = end + 2;
+    } else {
+      const end = value.indexOf("`", codeStart + 1);
+      if (end < 0) {
+        result += escapeHtml(value.slice(codeStart));
+        break;
+      }
+      result += `<code>${escapeHtml(value.slice(codeStart + 1, end))}</code>`;
+      index = end + 1;
+    }
+  }
+  return result;
 }
 
 function renderAgent(agent: AgentCapabilitySummary): string {

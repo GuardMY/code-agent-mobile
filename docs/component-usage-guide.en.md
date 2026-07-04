@@ -143,5 +143,5 @@ For Android changes, follow the root `AGENTS.md` rebuild rule and run an Android
 For VS Code extension changes, run:
 
 ```powershell
-npm run build -w agent-mobile-control
+npm run package:extension
 ```

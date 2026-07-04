@@ -3,7 +3,6 @@ import { networkInterfaces } from "node:os";
 import { CodexAdapter } from "./adapters/codexAdapter.js";
 import { buildServer } from "./server.js";
 import { SessionManager } from "./sessions/sessionManager.js";
-import { FileSessionStorage } from "./storage/fileSessionStorage.js";
 import { startRelayClient } from "./relayClient.js";
 
 const port = Number(readArg("--port") ?? process.env.AGENT_MOBILE_PORT ?? 17365);
@@ -15,22 +14,18 @@ const pairingToken = readArg("--pairing-token") ?? `pair_${randomBytes(18).toStr
 const relayUrl = readArg("--relay-url") ?? process.env.AGENT_MOBILE_RELAY_URL;
 const relayHostId = readArg("--relay-host-id") ?? process.env.AGENT_MOBILE_RELAY_HOST_ID;
 const relayToken = readArg("--relay-token") ?? process.env.AGENT_MOBILE_RELAY_TOKEN;
-const pairingExpiresAt = new Date(Date.now() + 5 * 60 * 1000);
 const advertisedHost = host === "0.0.0.0" ? firstLanAddress() ?? "127.0.0.1" : host;
 const manager = new SessionManager({
   adapter: new CodexAdapter({ command: codexCommand, args: [] }),
   workspace,
-  eventCacheSize,
-  storage: new FileSessionStorage(workspace)
+  eventCacheSize
 });
-await manager.loadFromStorage();
 
 const app = buildServer({
   manager,
   version: "0.1.0",
   lanEnabled: host === "0.0.0.0",
   pairingToken,
-  pairingExpiresAt,
   deviceName: "VS Code",
   advertisedHost,
   port
@@ -46,8 +41,7 @@ console.log(
     type: "agent-mobile.ready",
     host: advertisedHost,
     port,
-    pairingToken,
-    expiresAt: pairingExpiresAt.toISOString()
+    pairingToken
   })
 );
 

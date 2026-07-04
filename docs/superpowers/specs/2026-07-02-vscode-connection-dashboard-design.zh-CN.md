@@ -1,60 +1,28 @@
-# VS Code 连接仪表盘设计
+﻿# VS Code 杩炴帴浠〃鐩樿璁?
+## 鐩爣
 
-## 目标
+涓?VS Code 鎻掍欢澧炲姞杩炴帴浠〃鐩橈紝灞曠ず鏈湴 Agent Host銆佸凡閰嶅绉诲姩瀹㈡埛绔拰妗岄潰 Agent 鍚庣鐨勭姸鎬併€傞娆′娇鐢ㄦ椂锛屼华琛ㄧ洏搴旂獊鍑轰簩缁寸爜/閰嶅 JSON锛涢厤瀵瑰悗锛屽畠缁х画浣滀负鐘舵€侀潰鏉夸娇鐢ㄣ€?
+## 閫夊畾鏂规
 
-为 VS Code 插件增加连接仪表盘，展示本地 Agent Host、已配对移动客户端和桌面 Agent 后端的状态。首次使用时，仪表盘应突出二维码/配对 JSON；配对后，它继续作为状态面板使用。
-
-## 选定方案
-
-使用 Host 聚合状态接口：
+浣跨敤 Host 鑱氬悎鐘舵€佹帴鍙ｏ細
 
 ```text
 GET /status
 ```
 
-VS Code Webview 周期性拉取该接口并渲染状态。第一版使用轮询而不是 WebSocket，以降低实现复杂度，并保持测试简单。未来可在不改变状态模型的前提下替换为订阅。
+VS Code Webview 鍛ㄦ湡鎬ф媺鍙栬鎺ュ彛骞舵覆鏌撶姸鎬併€傜涓€鐗堜娇鐢ㄨ疆璇㈣€屼笉鏄?WebSocket锛屼互闄嶄綆瀹炵幇澶嶆潅搴︼紝骞朵繚鎸佹祴璇曠畝鍗曘€傛湭鏉ュ彲鍦ㄤ笉鏀瑰彉鐘舵€佹ā鍨嬬殑鍓嶆彁涓嬫浛鎹负璁㈤槄銆?
+## 淇℃伅妯″瀷
 
-## 信息模型
+`/status` 杩斿洖锛?
+Host 启动后会输出一条 JSON ready 消息，其中包含对外地址、端口和配对 token。配对后的访问令牌长期有效，直到桌面端插件或移动端手动解绑。
+## Webview 琛屼负
 
-`/status` 返回：
+- Host 鏈惎鍔細鏄剧ず stopped 鐘舵€佸拰鍚姩鍏ュ彛銆?- Host 鍚姩涓細鏄剧ず starting 鐘舵€併€?- Host 杩愯涓細鏄剧ず server銆乸airing銆乨evices銆乤gents銆乻essions銆?- 鏃犺澶囨椂锛氭彁绀烘壂鎻忎簩缁寸爜杩炴帴绗竴鍙扮Щ鍔ㄨ澶囥€?- 鏈夎澶囨椂锛氬睍绀鸿澶囩姸鎬侊紝骞朵繚鐣欐坊鍔犺澶囧叆鍙ｃ€?- Host 涓嶅彲杈撅細鏄剧ず閿欒淇℃伅鍜屽埛鏂版寜閽€?
+## UI 鍘熷垯
 
-- `server`：Host 是否运行、监听地址、端口、设备名、版本。
-- `pairing`：配对是否可用、过期时间、配对 payload。
-- `devices`：已配对设备列表，包含客户端类型、配对时间、token 过期时间和撤销状态。
-- `agents`：Codex、Claude Code、OpenCode 的能力状态和活跃 session 数。
-- `sessions`：当前 Host 认识的 session 摘要。
+- 淇濈暀鍗曚釜 `agentMobile.pairingView` Webview銆?- 浣跨敤 VS Code 涓婚鍙橀噺锛岄伩鍏嶈嚜瀹氫箟鍝佺墝鑹茬牬鍧忕紪杈戝櫒鐜銆?- 淇℃伅瀵嗗害閫備腑锛岄€傚悎渚ц竟鏍忕獎闈㈡澘銆?- 鎸夋湇鍔°€侀厤瀵广€佽澶囥€丄gent銆佷細璇濆垎缁勩€?- 鎵€鏈夋帶鍒舵寜閽娇鐢ㄦ槑纭姩浣滄枃妗堛€?
+## 娴嬭瘯
 
-## Webview 行为
-
-- Host 未启动：显示 stopped 状态和启动入口。
-- Host 启动中：显示 starting 状态。
-- Host 运行中：显示 server、pairing、devices、agents、sessions。
-- 无设备时：提示扫描二维码连接第一台移动设备。
-- 有设备时：展示设备状态，并保留添加设备入口。
-- Host 不可达：显示错误信息和刷新按钮。
-
-## UI 原则
-
-- 保留单个 `agentMobile.pairingView` Webview。
-- 使用 VS Code 主题变量，避免自定义品牌色破坏编辑器环境。
-- 信息密度适中，适合侧边栏窄面板。
-- 按服务、配对、设备、Agent、会话分组。
-- 所有控制按钮使用明确动作文案。
-
-## 测试
-
-- 协议测试验证 dashboard status schema。
-- Host 测试验证 `/status` 返回完整结构。
-- Webview 测试验证：
-  - 不加载远程脚本。
-  - 渲染 first-time pairing 状态。
-  - 渲染 Android 和微信小程序设备标签。
-  - 渲染 Codex、Claude Code、OpenCode 能力状态。
-  - 渲染 session 摘要。
-
-## 非目标
-
-- 不在第一版加入完整会话控制台。
-- 不实现远程 Relay 状态配置 UI。
-- 不实现设备 token 刷新流程。
-- 不实现 Claude Code 或 OpenCode adapter。
+- 鍗忚娴嬭瘯楠岃瘉 dashboard status schema銆?- Host 娴嬭瘯楠岃瘉 `/status` 杩斿洖瀹屾暣缁撴瀯銆?- Webview 娴嬭瘯楠岃瘉锛?  - 涓嶅姞杞借繙绋嬭剼鏈€?  - 娓叉煋 first-time pairing 鐘舵€併€?  - 娓叉煋 Android 鍜屽井淇″皬绋嬪簭璁惧鏍囩銆?  - 娓叉煋 Codex銆丆laude Code銆丱penCode 鑳藉姏鐘舵€併€?  - 娓叉煋 session 鎽樿銆?
+## 闈炵洰鏍?
+- 涓嶅湪绗竴鐗堝姞鍏ュ畬鏁翠細璇濇帶鍒跺彴銆?- 涓嶅疄鐜拌繙绋?Relay 鐘舵€侀厤缃?UI銆?- 涓嶅疄鐜拌澶?token 鍒锋柊娴佺▼銆?- 涓嶅疄鐜?Claude Code 鎴?OpenCode adapter銆?

@@ -8,7 +8,7 @@ describe("pairing payload", () => {
     expect(typeof module.createPairingPayload).toBe("function");
   });
 
-  it("contains LAN host, port, token, device name, and future expiry", () => {
+  it("contains LAN host, port, token, and device name without expiry", () => {
     const payload = createPairingPayload({
       host: "192.168.1.10",
       port: 17365,
@@ -19,6 +19,6 @@ describe("pairing payload", () => {
     expect(payload.host).toBe("192.168.1.10");
     expect(payload.port).toBe(17365);
     expect(payload.pairingToken).toBe("pairing-token-123");
-    expect(Date.parse(payload.expiresAt)).toBeGreaterThan(Date.now());
+    expect("expiresAt" in payload).toBe(false);
   });
 });

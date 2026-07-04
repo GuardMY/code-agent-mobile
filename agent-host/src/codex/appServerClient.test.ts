@@ -302,4 +302,58 @@ describe("appServerClient", () => {
 
     expect(outputs).toContain("previous answer");
   });
+
+  it("emits historical text from current Codex thread turns", async () => {
+    const child = createFakeChild();
+    child.stdin.on("data", (chunk) => {
+      for (const line of chunk.toString("utf8").split("\n")) {
+        if (!line.trim()) {
+          continue;
+        }
+        const message = JSON.parse(line) as { id?: number };
+        if (message.id === 0) {
+          child.stdout.write(`${JSON.stringify({ id: 0, result: { ok: true } })}\n`);
+        } else if (message.id === 1) {
+          child.stdout.write(
+            `${JSON.stringify({
+              id: 1,
+              result: {
+                thread: {
+                  id: "thr_existing",
+                  turns: [
+                    {
+                      items: [
+                        {
+                          type: "userMessage",
+                          content: [{ type: "text", text: "previous question" }]
+                        },
+                        {
+                          type: "agentMessage",
+                          text: "previous answer"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            })}\n`
+          );
+        }
+      }
+    });
+    const outputs: string[] = [];
+
+    await createAttachedAppServerCodexProcess({
+      child: child as never,
+      threadId: "thr_existing",
+      options: {
+        clientInfo: { name: "agent_mobile_vscode", title: "Agent Mobile VS Code", version: "0.1.0" },
+        cwd: "E:/repo",
+        onOutput: (_stream, text) => outputs.push(text),
+        onExit: vi.fn()
+      }
+    });
+
+    expect(outputs).toEqual(["previous question", "previous answer"]);
+  });
 });
