@@ -118,11 +118,11 @@ describe("webview html", () => {
 
     expect(html).toContain("Codex 会话");
     expect(html).toContain("Fix mobile handoff");
+    expect(html).toContain("项目目录：E:/Code/code-agent-mobile");
     expect(html).toContain("2026-07-02 20:00");
     expect(html).not.toContain("2026-07-02T12:00:00.000Z");
     expect(html).not.toContain(">sess_codex_1<");
     expect(html).not.toContain("codex / running / seq 7");
-    expect(html).not.toContain("E:/Code/code-agent-mobile");
   });
 
   it("keeps additional Codex sessions in a scrollable list after the latest three", async () => {
@@ -211,6 +211,7 @@ describe("webview html", () => {
     expect(html).toContain('data-command="selectSession"');
     expect(html).toContain('data-session-id="codex_thr_desktop"');
     expect(html).toContain("Fix mobile handoff");
+    expect(html).toContain("项目目录：E:/Code/code-agent-mobile");
     expect(html).not.toContain("codex_thr_desktop / running");
     expect(html).toContain("hello from codex");
     expect(html).not.toContain("other session");

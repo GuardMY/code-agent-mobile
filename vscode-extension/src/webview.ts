@@ -112,6 +112,9 @@ export async function renderPairingHtml(input: {
       color: var(--vscode-descriptionForeground);
       font-size: 12px;
     }
+    .session-meta {
+      overflow-wrap: anywhere;
+    }
     .pill {
       flex: 0 0 auto;
       padding: 2px 6px;
@@ -357,6 +360,7 @@ function renderSessions(sessions: SessionSummary[], selectedSessionId?: string):
       const displayTitle = truncateSessionTitle(title);
       return `<button class="session-row${selected ? " selected" : ""}" data-command="selectSession" data-session-id="${escapeHtml(session.id)}" title="${escapeHtml(title)}">
         <div class="label">${escapeHtml(displayTitle)}</div>
+        <div class="muted session-meta">项目目录：${escapeHtml(session.workspace)}</div>
         <div class="muted">${escapeHtml(formatSessionTime(session.startedAt))}</div>
       </button>`;
     })
@@ -404,6 +408,7 @@ function renderSessionConsole(
   return `<section class="section console">
     <h3>会话详情</h3>
     <div class="label">${escapeHtml(title)}</div>
+    <div class="muted session-meta">项目目录：${escapeHtml(selected.workspace)}</div>
     ${consoleError ? `<p class="danger">${escapeHtml(consoleError)}</p>` : ""}
     <div class="output">
       ${

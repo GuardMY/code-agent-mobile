@@ -347,7 +347,14 @@ fun SessionRow(session: SessionSummary, onSelectSession: (String) -> Unit) {
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    "${session.adapterId} - ${session.startedAt}",
+                    sessionWorkspaceText(session),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    sessionSecondaryText(session),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -358,6 +365,10 @@ fun SessionRow(session: SessionSummary, onSelectSession: (String) -> Unit) {
         }
     }
 }
+
+fun sessionWorkspaceText(session: SessionSummary): String = "Project: ${session.workspace}"
+
+fun sessionSecondaryText(session: SessionSummary): String = "${session.adapterId} - ${session.startedAt}"
 
 @Composable
 fun ConsoleScreen(
