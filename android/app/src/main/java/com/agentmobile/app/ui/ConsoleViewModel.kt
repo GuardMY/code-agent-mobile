@@ -1,7 +1,9 @@
 package com.agentmobile.app.ui
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.agentmobile.app.data.DeviceRepository
 import com.agentmobile.app.model.ApprovalRequest
 import com.agentmobile.app.model.AgentCapabilitySummary
 import com.agentmobile.app.model.ConnectionInfo
@@ -35,7 +37,9 @@ data class ConsoleUiState(
     val lastSeq: Long = 0,
     val error: String? = null,
     val connected: Boolean = false,
-    val showingSessionDetail: Boolean = false
+    val showingSessionDetail: Boolean = false,
+    val reauthing: Boolean = false,
+    val selectedTab: String = "codex"
 )
 
 class ConsoleViewModel(
@@ -48,11 +52,50 @@ class ConsoleViewModel(
     val state: StateFlow<ConsoleUiState> = _state
     private var socket: WebSocket? = null
     private var reconnectAttempts = 0
+    private var appContext: Context? = null
+
+    /** Must be called from Activity before any persistence-dependent methods. */
+    fun initStorage(context: Context) {
+        appContext = context.applicationContext
+    }
 
     private data class AuthorizedResult<T>(
         val connection: ConnectionInfo,
         val value: T
     )
+
+    fun tryReauth() {
+        val ctx = appContext ?: return
+        val persisted = DeviceRepository.load(ctx) ?: return
+        _state.update { it.copy(reauthing = true) }
+        viewModelScope.launch(ioDispatcher) {
+            runCatching {
+                val refreshed = client.reauth(persisted)
+                withReauth(refreshed) { current -> client.getStatus(current) }
+            }.onSuccess { result ->
+                val activeConnection = result.connection
+                val status = result.value
+                val lastSeq = status.sessions.maxOfOrNull { it.lastSeq } ?: 0
+                _state.update {
+                    it.copy(
+                        connection = activeConnection,
+                        agents = status.agents,
+                        sessions = status.sessions,
+                        session = null,
+                        showingSessionDetail = false,
+                        lastSeq = lastSeq,
+                        connected = true,
+                        reauthing = false,
+                        error = null
+                    )
+                }
+                reconnectStream(activeConnection)
+            }.onFailure {
+                DeviceRepository.clear(ctx)
+                _state.update { it.copy(reauthing = false, error = null) }
+            }
+        }
+    }
 
     fun connect(pairingJson: String) {
         viewModelScope.launch(ioDispatcher) {
@@ -63,6 +106,7 @@ class ConsoleViewModel(
             }.onSuccess { result ->
                 val activeConnection = result.connection
                 val status = result.value
+                appContext?.let { DeviceRepository.save(it, activeConnection) }
                 val lastSeq = status.sessions.maxOfOrNull { it.lastSeq } ?: 0
                 _state.update {
                     it.copy(
@@ -112,8 +156,27 @@ class ConsoleViewModel(
         _state.update { it.copy(showingSessionDetail = false, session = null, error = null) }
     }
 
+    fun selectTab(adapterId: String) {
+        _state.update { it.copy(selectedTab = adapterId) }
+    }
+
+    fun unbind() {
+        val connection = _state.value.connection
+        socket?.cancel()
+        socket = null
+        appContext?.let { DeviceRepository.clear(it) }
+        if (connection != null) {
+            viewModelScope.launch(ioDispatcher) {
+                runCatching {
+                    client.revokeDevice(connection, requireNotNull(connection.deviceId))
+                }
+            }
+        }
+        _state.update { ConsoleUiState() }
+    }
+
     fun createSession() {
-        _state.update { it.copy(error = "Start Codex sessions on the desktop first") }
+        _state.update { it.copy(error = "请先在桌面端启动 Codex 会话。") }
     }
 
     fun send(text: String) {

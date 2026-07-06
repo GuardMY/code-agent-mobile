@@ -31,8 +31,9 @@ export async function renderPairingHtml(input: {
   selectedSessionId?: string;
   sessionEvents?: SessionConsoleEvent[];
   consoleError?: string;
+  selectedTab?: string;
 }): Promise<string> {
-  const dashboard = renderDashboard(input);
+  const dashboard = renderDashboard({ ...input, selectedTab: input.selectedTab });
   const pairingConnectionHtml = renderPairingConnectionPanel({
     pairingJson: input.pairingJson,
     qrSvg: input.qrSvg
@@ -111,6 +112,44 @@ export async function renderPairingHtml(input: {
       max-height: 280px;
       overflow-y: auto;
       padding-right: 2px;
+    }
+    .session-tabs {
+      display: flex;
+      gap: 0;
+      border-bottom: 2px solid var(--vscode-panel-border);
+      margin-bottom: 4px;
+    }
+    .session-tab {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      flex: 1;
+      padding: 6px 4px;
+      color: var(--vscode-descriptionForeground);
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      cursor: pointer;
+      font-family: var(--vscode-font-family);
+      font-size: 12px;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .session-tab:hover {
+      color: var(--vscode-foreground);
+    }
+    .session-tab.active {
+      color: var(--vscode-focusBorder);
+      border-bottom-color: var(--vscode-focusBorder);
+      font-weight: 650;
+    }
+    .tab-label {
+      font-weight: inherit;
+    }
+    .tab-count {
+      font-size: 10px;
+      opacity: 0.7;
     }
     .row {
       display: flex;
@@ -448,6 +487,10 @@ export async function renderPairingHtml(input: {
         if (textarea) textarea.value = "";
         return;
       }
+      if (command === "selectTab") {
+        vscode.postMessage({ command, tabId: button.dataset.tabId });
+        return;
+      }
       vscode.postMessage({ command, sessionId: button.dataset.sessionId, deviceId: button.dataset.deviceId });
     });
   </script>
@@ -463,6 +506,7 @@ function renderDashboard(input: {
   selectedSessionId?: string;
   sessionEvents?: SessionConsoleEvent[];
   consoleError?: string;
+  selectedTab?: string;
 }): { mainHtml: string } {
   if (!input.dashboard) {
     return {
@@ -510,9 +554,10 @@ function renderDashboard(input: {
     </section>`
       ),
       renderPanel(
-      "Codex 会话",
+      "Agent 会话",
       `<section class="section">
-      <div class="session-list">${renderSessions(status.sessions, input.selectedSessionId)}</div>
+      ${renderSessionTabs(input.selectedTab ?? "codex", status.sessions)}
+      <div class="session-list">${renderSessions(status.sessions, input.selectedTab ?? "codex", input.selectedSessionId)}</div>
     </section>`
       ),
       sessionDetailHtml
@@ -611,11 +656,15 @@ function isVisibleMobileDevice(device: DeviceSummary): boolean {
   return MOBILE_CLIENT_TYPES.includes(device.clientType) && !device.revokedAt;
 }
 
-function renderSessions(sessions: SessionSummary[], selectedSessionId?: string): string {
-  if (sessions.length === 0) {
-    return `<p class="muted">当前工作区没有可复用的 Codex 会话。</p>`;
+function renderSessions(sessions: SessionSummary[], selectedTab: string, selectedSessionId?: string): string {
+  const filtered = sessions
+    .filter((session) => session.adapterId === selectedTab)
+    .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+  if (filtered.length === 0) {
+    const tabLabel = ADAPTER_TABS.find((t) => t.id === selectedTab)?.label ?? selectedTab;
+    return `<p class="muted">暂无 ${escapeHtml(tabLabel)} 会话。</p>`;
   }
-  return sessions
+  return filtered
     .map((session) => {
       const selected = session.id === selectedSessionId;
       const title = session.title ?? session.id;
@@ -627,6 +676,23 @@ function renderSessions(sessions: SessionSummary[], selectedSessionId?: string):
       </button>`;
     })
     .join("");
+}
+
+const ADAPTER_TABS = [
+  { id: "codex", label: "CODEX" },
+  { id: "claude-code", label: "Claude" },
+  { id: "opencode", label: "OpenCode" }
+];
+
+function renderSessionTabs(selectedTab: string, sessions: SessionSummary[]): string {
+  return `<div class="session-tabs">${ADAPTER_TABS.map((tab) => {
+    const count = sessions.filter((s) => s.adapterId === tab.id).length;
+    const isSelected = tab.id === selectedTab;
+    return `<button type="button" class="session-tab${isSelected ? " active" : ""}" data-command="selectTab" data-tab-id="${escapeHtml(tab.id)}">
+      <span class="tab-label">${escapeHtml(tab.label)}</span>
+      <span class="tab-count">${count}</span>
+    </button>`;
+  }).join("")}</div>`;
 }
 
 function truncateSessionTitle(title: string): string {
@@ -642,7 +708,7 @@ function formatSessionTime(value: string): string {
     return value;
   }
 
-  const parts = new Intl.DateTimeFormat("en-CA", {
+  const parts = new Intl.DateTimeFormat("zh-CN", {
     timeZone: "Asia/Shanghai",
     year: "numeric",
     month: "2-digit",
@@ -696,8 +762,8 @@ function renderSessionConsole(
 
 function renderSessionEvent(event: RenderedSessionMessage): string {
   const isUser = event.type === "agent.input";
-  const label = isUser ? "User" : "Agent";
-  const seqLabel = event.seq > 0 ? `#${event.seq}` : "local";
+  const label = isUser ? "用户" : "Agent";
+  const seqLabel = event.seq > 0 ? `#${event.seq}` : "本地";
   return `<div class="message ${isUser ? "user-message" : "agent-message"}">
     <div class="muted">${seqLabel} ${label}</div>
     <div class="message-body">${renderMarkdown(event.text)}</div>

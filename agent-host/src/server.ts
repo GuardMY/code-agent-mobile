@@ -155,7 +155,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
         request.headers["x-agent-mobile-pairing-token"] === options.pairingToken || isLoopbackRequest(request)
           ? trustedDevices
           : [],
-      agents: buildAgentSummaries(sessions, options.manager.getAdapterAvailability()),
+      agents: buildAgentSummaries(sessions, options.manager.getAdaptersAvailability()),
       sessions
     };
   });
@@ -278,12 +278,18 @@ export function buildServer(options: ServerOptions): FastifyInstance {
   return app;
 }
 
-function buildAgentSummaries(sessions: SessionSummary[], codexAvailability: AgentCapabilitySummary["availability"]): AgentCapabilitySummary[] {
-  return [
-    buildAgentSummary("codex", "Codex", sessions, codexAvailability),
-    buildAgentSummary("claude-code", "Claude Code", sessions),
-    buildAgentSummary("opencode", "OpenCode", sessions)
+function buildAgentSummaries(
+  sessions: SessionSummary[],
+  adapterAvailability: Map<string, AgentCapabilitySummary["availability"]>
+): AgentCapabilitySummary[] {
+  const knownAgents: Array<{ id: AgentCapabilitySummary["id"]; displayName: string }> = [
+    { id: "codex", displayName: "Codex" },
+    { id: "claude-code", displayName: "Claude Code" },
+    { id: "opencode", displayName: "OpenCode" }
   ];
+  return knownAgents.map((agent) =>
+    buildAgentSummary(agent.id, agent.displayName, sessions, adapterAvailability.get(agent.id) ?? "unknown")
+  );
 }
 
 function buildAgentSummary(

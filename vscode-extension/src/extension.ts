@@ -17,6 +17,7 @@ type ExtensionState = {
   selectedSessionId?: string;
   sessionEvents: SessionConsoleEvent[];
   consoleError?: string;
+  selectedTab: string;
 };
 
 type HostClientTarget = {
@@ -58,6 +59,7 @@ export function createInitialState(): {
   selectedSessionId?: string;
   sessionEvents: SessionConsoleEvent[];
   consoleError?: string;
+  selectedTab: string;
 } {
   return {
     lanEnabled: false,
@@ -67,7 +69,8 @@ export function createInitialState(): {
     pairingJson: "{}",
     selectedSessionId: undefined,
     sessionEvents: [],
-    consoleError: undefined
+    consoleError: undefined,
+    selectedTab: "codex"
   };
 }
 
@@ -342,6 +345,7 @@ class PairingViewProvider implements vscode.WebviewViewProvider {
       selectedSessionId?: string;
       sessionEvents: SessionConsoleEvent[];
       consoleError?: string;
+      selectedTab: string;
     },
     private readonly deviceRegistry: DeviceRegistryLike
   ) {}
@@ -365,7 +369,7 @@ class PairingViewProvider implements vscode.WebviewViewProvider {
     this.view = webviewView;
     webviewView.webview.options = { enableScripts: true };
     webviewView.webview.html = "<!doctype html><html><body><p>正在加载 Agent Mobile...</p></body></html>";
-    webviewView.webview.onDidReceiveMessage((message: { command?: string; sessionId?: string; text?: string; deviceId?: string }) => {
+    webviewView.webview.onDidReceiveMessage((message: { command?: string; sessionId?: string; text?: string; deviceId?: string; tabId?: string }) => {
       if (message.command === "enable") {
         void vscode.commands.executeCommand("agentMobile.enableLanPairing");
       } else if (message.command === "disable") {
@@ -384,6 +388,9 @@ class PairingViewProvider implements vscode.WebviewViewProvider {
         void this.sendInput(message.sessionId, message.text ?? "");
       } else if (message.command === "stopSession" && message.sessionId) {
         void this.stopSession(message.sessionId);
+      } else if (message.command === "selectTab" && message.tabId) {
+        this.state.selectedTab = message.tabId;
+        void this.safeRefresh();
       }
     });
     this.refreshTimer = setInterval(() => {
@@ -445,7 +452,8 @@ class PairingViewProvider implements vscode.WebviewViewProvider {
       dashboard: selectDashboardForRender(dashboard, hostStatus),
       selectedSessionId: this.state.selectedSessionId,
       sessionEvents: this.state.sessionEvents,
-      consoleError: this.state.consoleError
+      consoleError: this.state.consoleError,
+      selectedTab: this.state.selectedTab
     });
   }
 

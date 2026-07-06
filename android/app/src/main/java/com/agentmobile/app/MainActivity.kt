@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -38,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
@@ -66,6 +69,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        viewModel.initStorage(applicationContext)
+        viewModel.tryReauth()
         setContent {
             MaterialTheme(colorScheme = AgentMobileColors) {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -78,7 +83,9 @@ class MainActivity : ComponentActivity() {
                         onShowSessionList = viewModel::showSessionList,
                         onSend = viewModel::send,
                         onStop = viewModel::stop,
-                        onRespondApproval = viewModel::respondApproval
+                        onRespondApproval = viewModel::respondApproval,
+                        onUnbind = viewModel::unbind,
+                        onSelectTab = viewModel::selectTab
                     )
                 }
             }
@@ -110,12 +117,16 @@ fun AgentMobileApp(
     onShowSessionList: () -> Unit,
     onSend: (String) -> Unit,
     onStop: () -> Unit,
-    onRespondApproval: (String, String) -> Unit
+    onRespondApproval: (String, String) -> Unit,
+    onUnbind: () -> Unit,
+    onSelectTab: (String) -> Unit
 ) {
-    if (state.connection == null) {
+    if (state.reauthing) {
+        ReauthingScreen()
+    } else if (state.connection == null) {
         PairingScreen(state.error, onConnect, onScan)
     } else if (!state.showingSessionDetail) {
-        DashboardScreen(state, onSelectSession)
+        DashboardScreen(state, onSelectSession, onUnbind, onSelectTab)
     } else {
         ConsoleScreen(state, onShowSessionList, onSend, onStop, onRespondApproval)
     }
@@ -157,7 +168,7 @@ fun AgentRow(agent: AgentCapabilitySummary) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(agent.displayName, fontWeight = FontWeight.SemiBold)
             Text(
-                "${agent.activeSessions} active session(s)",
+                "${agent.activeSessions} 个活跃会话",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -179,12 +190,23 @@ fun StatusPill(text: String) {
         "starting", "unknown", "not started" -> Color(0xFF7A5600)
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
+    val displayText = when (normalized) {
+        "running" -> "运行中"
+        "available" -> "可用"
+        "starting" -> "启动中"
+        "unknown" -> "未知"
+        "not started" -> "未启动"
+        "exited" -> "已退出"
+        "failed" -> "失败"
+        "stopped" -> "已停止"
+        else -> text
+    }
     Box(
         modifier = Modifier
             .background(container, RoundedCornerShape(999.dp))
             .padding(horizontal = 10.dp, vertical = 5.dp)
     ) {
-        Text(text, style = MaterialTheme.typography.labelSmall, color = content, fontWeight = FontWeight.SemiBold)
+        Text(displayText, style = MaterialTheme.typography.labelSmall, color = content, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -213,6 +235,25 @@ fun ErrorBanner(text: String) {
 }
 
 @Composable
+fun ReauthingScreen() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            CircularProgressIndicator()
+            Text(
+                "正在重新连接…",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
 fun PairingScreen(error: String?, onConnect: (String) -> Unit, onScan: () -> Unit) {
     var pairingJson by remember { mutableStateOf("") }
     Column(
@@ -224,7 +265,7 @@ fun PairingScreen(error: String?, onConnect: (String) -> Unit, onScan: () -> Uni
     ) {
         AppHeader(
             title = "Agent Mobile",
-            subtitle = "Pair this phone with the desktop host"
+            subtitle = "将手机与桌面主机配对"
         )
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -241,17 +282,17 @@ fun PairingScreen(error: String?, onConnect: (String) -> Unit, onScan: () -> Uni
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(vertical = 14.dp)
                 ) {
-                    Text("Scan QR", fontWeight = FontWeight.SemiBold)
+                    Text("扫描二维码", fontWeight = FontWeight.SemiBold)
                 }
                 Text(
-                    "Paste the pairing JSON if the camera is unavailable.",
+                    "如果无法使用相机，请粘贴配对 JSON。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 OutlinedTextField(
                     value = pairingJson,
                     onValueChange = { pairingJson = it },
-                    label = { Text("Pairing JSON") },
+                    label = { Text("配对 JSON") },
                     minLines = 6,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -260,7 +301,7 @@ fun PairingScreen(error: String?, onConnect: (String) -> Unit, onScan: () -> Uni
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(vertical = 14.dp)
                 ) {
-                    Text("Connect")
+                    Text("连接")
                 }
             }
         }
@@ -273,8 +314,17 @@ fun PairingScreen(error: String?, onConnect: (String) -> Unit, onScan: () -> Uni
 @Composable
 fun DashboardScreen(
     state: ConsoleUiState,
-    onSelectSession: (String) -> Unit
+    onSelectSession: (String) -> Unit,
+    onUnbind: () -> Unit,
+    onSelectTab: (String) -> Unit
 ) {
+    val tabs = listOf(
+        "codex" to "CODEX",
+        "claude-code" to "Claude",
+        "opencode" to "OpenCode"
+    )
+    val filteredSessions = state.sessions.filter { it.adapterId == state.selectedTab }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -284,7 +334,7 @@ fun DashboardScreen(
     ) {
         AppHeader(
             title = "Agent Mobile",
-            subtitle = "Connected to ${state.connection?.host}:${state.connection?.port}"
+            subtitle = "已连接到 ${state.connection?.host}:${state.connection?.port}"
         )
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -293,9 +343,9 @@ fun DashboardScreen(
             elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
         ) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                SectionLabel("Desktop agent")
+                SectionLabel("桌面 Agent")
                 if (state.agents.isEmpty()) {
-                    EmptyState("No desktop agent status yet")
+                    EmptyState("暂无桌面 Agent 状态")
                 } else {
                     state.agents.forEachIndexed { index, agent ->
                         AgentRow(agent)
@@ -306,22 +356,75 @@ fun DashboardScreen(
                 }
             }
         }
-        SectionLabel("Agent sessions")
+        SectionLabel("Agent 会话")
+        // Tab bar
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(0.dp)
+        ) {
+            tabs.forEach { (adapterId, label) ->
+                val isSelected = state.selectedTab == adapterId
+                val sessionCount = state.sessions.count { it.adapterId == adapterId }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    TextButton(
+                        onClick = { onSelectTab(adapterId) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                label,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 14.sp
+                            )
+                            Text(
+                                "$sessionCount 个会话",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    if (isSelected) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                                .background(
+                                    MaterialTheme.colorScheme.primary,
+                                    RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)
+                                )
+                                .height(3.dp)
+                        )
+                    }
+                }
+            }
+        }
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (state.sessions.isEmpty()) {
+            if (filteredSessions.isEmpty()) {
                 item {
-                    EmptyState("Start a Codex session on the desktop first.")
+                    val adapterName = tabs.firstOrNull { it.first == state.selectedTab }?.second ?: state.selectedTab
+                    EmptyState("暂无 ${adapterName} 会话。")
                 }
             }
-            items(state.sessions) { session ->
+            items(filteredSessions) { session ->
                 SessionRow(session, onSelectSession)
             }
         }
         if (state.error != null) {
             ErrorBanner(state.error)
+        }
+        OutlinedButton(
+            onClick = onUnbind,
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(vertical = 14.dp)
+        ) {
+            Text("解绑", fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -366,7 +469,7 @@ fun SessionRow(session: SessionSummary, onSelectSession: (String) -> Unit) {
     }
 }
 
-fun sessionWorkspaceText(session: SessionSummary): String = "Project: ${session.workspace}"
+fun sessionWorkspaceText(session: SessionSummary): String = "项目：${session.workspace}"
 
 fun sessionSecondaryText(session: SessionSummary): String = "${session.adapterId} - ${session.startedAt}"
 
@@ -391,7 +494,7 @@ fun ConsoleScreen(
     ) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             TextButton(onClick = onShowSessionList) {
-                Text("Back to sessions")
+                Text("返回会话列表")
             }
             StatusPill(state.session?.status ?: "not started")
         }
@@ -405,7 +508,7 @@ fun ConsoleScreen(
                 enabled = state.session?.status == "running",
                 modifier = Modifier.weight(1f)
             ) {
-                Text("Stop")
+                Text("停止")
             }
         }
         state.approvals.forEach { approval ->
@@ -419,10 +522,10 @@ fun ConsoleScreen(
                     Text(approval.summary, style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { onRespondApproval(approval.approvalId, "approve") }) {
-                            Text("Approve")
+                            Text("批准")
                         }
                         OutlinedButton(onClick = { onRespondApproval(approval.approvalId, "deny") }) {
-                            Text("Deny")
+                            Text("拒绝")
                         }
                     }
                 }
@@ -436,7 +539,7 @@ fun ConsoleScreen(
         ) {
             if (visibleLines.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                    EmptyState("No messages in this session yet.")
+                    EmptyState("此会话暂无消息。")
                 }
             } else {
                 LazyColumn(
@@ -452,7 +555,7 @@ fun ConsoleScreen(
         OutlinedTextField(
             value = input,
             onValueChange = { input = it },
-            label = { Text("Prompt") },
+            label = { Text("输入提示") },
             modifier = Modifier.fillMaxWidth(),
             minLines = 2
         )
@@ -465,7 +568,7 @@ fun ConsoleScreen(
             modifier = Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(vertical = 14.dp)
         ) {
-            Text("Send", fontWeight = FontWeight.SemiBold)
+            Text("发送", fontWeight = FontWeight.SemiBold)
         }
         if (state.error != null) {
             ErrorBanner(state.error)
@@ -505,7 +608,7 @@ fun ConversationBubble(line: ConsoleLine) {
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(
-                text = if (isUser) "User" else "Agent",
+                text = if (isUser) "用户" else "Agent",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

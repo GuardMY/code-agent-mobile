@@ -42,7 +42,8 @@ export interface DiscoveredAgentSession {
 }
 
 export interface SessionManagerOptions {
-  adapter: AgentAdapter;
+  adapter?: AgentAdapter;
+  adapters?: AgentAdapter[];
   workspace: string;
   eventCacheSize: number;
   storage?: SessionStorage;
@@ -77,10 +78,28 @@ export class SessionManager {
   private readonly events: Envelope[] = [];
   private readonly approvals = new Map<string, ApprovalRequest>();
   private readonly subscribers = new Set<(event: Envelope) => void>();
+  private readonly adapters = new Map<string, AgentAdapter>();
   private seq = 0;
-  private desktopSyncError?: string;
+  private desktopSyncErrors = new Map<string, string>();
 
-  constructor(private readonly options: SessionManagerOptions) {}
+  constructor(private readonly options: SessionManagerOptions) {
+    const adapterList = options.adapters ?? (options.adapter ? [options.adapter] : []);
+    for (const a of adapterList) {
+      this.adapters.set(a.id, a);
+    }
+  }
+
+  getAdapterIds(): string[] {
+    return Array.from(this.adapters.keys());
+  }
+
+  getPrimaryAdapterId(): string {
+    const first = this.adapters.keys().next().value;
+    if (!first) {
+      throw new Error("No adapters registered");
+    }
+    return first;
+  }
 
   async loadFromStorage(): Promise<void> {
     if (!this.options.storage) {
@@ -113,75 +132,99 @@ export class SessionManager {
   }
 
   listSessions(): SessionSummary[] {
-    return Array.from(this.sessions.values()).map((record) => record.summary);
+    return Array.from(this.sessions.values())
+      .map((record) => record.summary)
+      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
   }
 
   async syncDesktopSessions(): Promise<void> {
-    let discovered: DiscoveredAgentSession[] | undefined;
-    try {
-      discovered = await this.options.adapter.discoverSessions?.({ workspace: this.options.workspace });
-      this.desktopSyncError = undefined;
-    } catch (error) {
-      this.desktopSyncError = error instanceof Error ? error.message : String(error);
-      return;
-    }
-    if (!discovered) {
-      return;
-    }
-    const workspaceSessions = discovered.filter(
-      (item) => normalizePath(item.workspace) === normalizePath(this.options.workspace)
-    );
-    const discoveredExternalIds = new Set(workspaceSessions.map((session) => session.id));
-
-    for (const [sessionId, record] of this.sessions.entries()) {
-      if (
-        record.summary.adapterId !== this.options.adapter.id ||
-        !record.externalId ||
-        normalizePath(record.summary.workspace) !== normalizePath(this.options.workspace)
-      ) {
+    for (const [adapterId, adapter] of this.adapters.entries()) {
+      if (!adapter.discoverSessions) {
         continue;
       }
-      if (!discoveredExternalIds.has(record.externalId) && !record.process) {
-        this.sessions.delete(sessionId);
-      }
-    }
-
-    for (const session of workspaceSessions) {
-      const sessionId = `${this.options.adapter.id}_${session.id}`;
-      const existing = this.sessions.get(sessionId);
-      if (existing) {
-        existing.externalId = session.id;
-        existing.summary.title = session.title;
-        if (existing.summary.status !== "running") {
-          existing.summary.status = "running";
-          existing.process = undefined;
-        }
+      let discovered: DiscoveredAgentSession[] | undefined;
+      try {
+        discovered = await adapter.discoverSessions({ workspace: this.options.workspace });
+        this.desktopSyncErrors.delete(adapterId);
+      } catch (error) {
+        this.desktopSyncErrors.set(adapterId, error instanceof Error ? error.message : String(error));
         continue;
       }
-      this.sessions.set(sessionId, {
-        externalId: session.id,
-        summary: {
-          id: sessionId,
-          adapterId: this.options.adapter.id,
-          title: session.title,
-          workspace: session.workspace,
-          status: "running",
-          startedAt: session.updatedAt ?? new Date().toISOString(),
-          lastSeq: this.seq
+      if (!discovered) {
+        continue;
+      }
+      const workspaceSessions = discovered.filter(
+        (item) => normalizePath(item.workspace) === normalizePath(this.options.workspace)
+      );
+      const discoveredExternalIds = new Set(workspaceSessions.map((session) => session.id));
+
+      for (const [sessionId, record] of this.sessions.entries()) {
+        if (
+          record.summary.adapterId !== adapterId ||
+          !record.externalId ||
+          normalizePath(record.summary.workspace) !== normalizePath(this.options.workspace)
+        ) {
+          continue;
         }
-      });
+        if (!discoveredExternalIds.has(record.externalId) && !record.process) {
+          this.sessions.delete(sessionId);
+        }
+      }
+
+      for (const session of workspaceSessions) {
+        const sessionId = `${adapterId}_${session.id}`;
+        const existing = this.sessions.get(sessionId);
+        if (existing) {
+          existing.externalId = session.id;
+          existing.summary.title = session.title;
+          if (existing.summary.status !== "running") {
+            existing.summary.status = "running";
+            existing.process = undefined;
+          }
+          continue;
+        }
+        this.sessions.set(sessionId, {
+          externalId: session.id,
+          summary: {
+            id: sessionId,
+            adapterId,
+            title: session.title,
+            workspace: session.workspace,
+            status: "running",
+            startedAt: session.updatedAt ?? new Date().toISOString(),
+            lastSeq: this.seq
+          }
+        });
+      }
     }
   }
 
-  getAdapterAvailability(): AgentAvailability {
-    return this.desktopSyncError ? "missing" : "available";
+  getAdapterAvailability(adapterId?: string): AgentAvailability {
+    const id = adapterId ?? this.getPrimaryAdapterId();
+    if (!this.adapters.has(id)) {
+      return "unknown";
+    }
+    return this.desktopSyncErrors.has(id) ? "missing" : "available";
   }
 
-  async createSession(): Promise<SessionSummary> {
+  getAdaptersAvailability(): Map<string, AgentAvailability> {
+    const result = new Map<string, AgentAvailability>();
+    for (const id of this.adapters.keys()) {
+      result.set(id, this.getAdapterAvailability(id));
+    }
+    return result;
+  }
+
+  async createSession(adapterId?: string): Promise<SessionSummary> {
+    const id = adapterId ?? this.getPrimaryAdapterId();
+    const adapter = this.adapters.get(id);
+    if (!adapter) {
+      throw new Error(`Unknown adapter ${id}`);
+    }
     const sessionId = `sess_${nanoid(10)}`;
     const startedAt = new Date().toISOString();
 
-    const process = await this.options.adapter.start({
+    const process = await adapter.start({
       sessionId,
       workspace: this.options.workspace,
       onOutput: (_stream, text) => {
@@ -209,7 +252,7 @@ export class SessionManager {
 
     const summary: SessionSummary = {
       id: sessionId,
-      adapterId: this.options.adapter.id,
+      adapterId: adapter.id,
       workspace: this.options.workspace,
       status: "running",
       startedAt,
@@ -363,10 +406,15 @@ export class SessionManager {
   }
 
   private async attachDesktopSession(sessionId: string, externalId: string): Promise<AgentProcess> {
-    if (!this.options.adapter.attachSession) {
-      throw new Error(`Adapter ${this.options.adapter.id} cannot attach sessions`);
+    const record = this.requireSession(sessionId);
+    const adapter = this.adapters.get(record.summary.adapterId);
+    if (!adapter) {
+      throw new Error(`Unknown adapter ${record.summary.adapterId}`);
     }
-    return this.options.adapter.attachSession({
+    if (!adapter.attachSession) {
+      throw new Error(`Adapter ${adapter.id} cannot attach sessions`);
+    }
+    return adapter.attachSession({
       externalId,
       sessionId,
       workspace: this.options.workspace,

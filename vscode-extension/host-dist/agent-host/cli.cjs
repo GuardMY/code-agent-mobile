@@ -3955,7 +3955,7 @@ var require_buffer_list = __commonJS({
         }
       }, {
         key: "join",
-        value: function join(s) {
+        value: function join3(s) {
           if (this.length === 0) return "";
           var p = this.head;
           var ret = "" + p.data;
@@ -12499,7 +12499,7 @@ var require_thread_stream = __commonJS({
     var { version } = require_package();
     var { EventEmitter } = require("events");
     var { Worker } = require("worker_threads");
-    var { join } = require("path");
+    var { join: join3 } = require("path");
     var { pathToFileURL } = require("url");
     var { wait } = require_wait();
     var {
@@ -12550,7 +12550,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join(__dirname, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join3(__dirname, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         name: opts.workerOpts?.name || "thread-stream",
@@ -13018,7 +13018,7 @@ var require_transport = __commonJS({
     var { createRequire } = require("module");
     var { existsSync } = require("node:fs");
     var getCallers = require_caller();
-    var { join, isAbsolute, sep } = require("node:path");
+    var { join: join3, isAbsolute, sep } = require("node:path");
     var { fileURLToPath: fileURLToPath2 } = require("node:url");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
@@ -13171,7 +13171,7 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join(__dirname, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join3(__dirname, "worker.js");
         options.targets = targets.filter((dest) => dest.target).map((dest) => {
           return {
             ...dest,
@@ -13189,7 +13189,7 @@ var require_transport = __commonJS({
           });
         });
       } else if (pipeline) {
-        target = bundlerOverrides["pino-worker"] || join(__dirname, "worker.js");
+        target = bundlerOverrides["pino-worker"] || join3(__dirname, "worker.js");
         options.pipelines = [pipeline.map((dest) => {
           return {
             ...dest,
@@ -13212,7 +13212,7 @@ var require_transport = __commonJS({
           return origin;
         }
         if (origin === "pino/file") {
-          return join(__dirname, "..", "file.js");
+          return join3(__dirname, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -14192,7 +14192,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join = ",";
+            let join3 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -14206,7 +14206,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join = `,
+                join3 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -14214,13 +14214,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join;
+                res += join3;
               }
               const tmp = stringifyFnReplacer(String(i), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join3}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -14241,7 +14241,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join = `,
+              join3 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -14255,13 +14255,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join;
+                separator = join3;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join;
+              separator = join3;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -14302,7 +14302,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join = ",";
+            let join3 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -14315,7 +14315,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join = `,
+                join3 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -14323,13 +14323,13 @@ ${indentation}`;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join;
+                res += join3;
               }
               const tmp = stringifyArrayReplacer(String(i), value[i], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join3}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -14342,7 +14342,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join = `,
+              join3 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -14351,7 +14351,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join;
+                separator = join3;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -14409,20 +14409,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join2 = `,
+              const join4 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i = 0;
               for (; i < maximumValuesToStringify - 1; i++) {
                 const tmp2 = stringifyIndent(String(i), value[i], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join2;
+                res2 += join4;
               }
               const tmp = stringifyIndent(String(i), value[i], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join2}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join4}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -14438,16 +14438,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join = `,
+            const join3 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join, maximumBreadth);
+              res += stringifyTypedArray(value, join3, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join;
+              separator = join3;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -14458,13 +14458,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join;
+                separator = join3;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join;
+              separator = join3;
             }
             if (separator !== "") {
               res = `
@@ -41738,7 +41738,7 @@ __export(cli_exports, {
 module.exports = __toCommonJS(cli_exports);
 var import_node_url = require("node:url");
 var import_node_crypto3 = require("node:crypto");
-var import_node_os = require("node:os");
+var import_node_os3 = require("node:os");
 
 // ../node_modules/zod/v3/external.js
 var external_exports = {};
@@ -46419,6 +46419,544 @@ var CodexAdapter = class {
   }
 };
 
+// ../agent-host/src/adapters/claudeCodeAdapter.ts
+var import_node_child_process2 = require("node:child_process");
+var import_node_os2 = require("node:os");
+var import_node_path2 = require("node:path");
+
+// ../agent-host/src/claude/claudeCodeClient.ts
+var import_node_readline2 = require("node:readline");
+var ClaudeCodeProcess = class {
+  constructor(client, child, exited) {
+    this.client = client;
+    this.child = child;
+    this.exited = exited;
+  }
+  sendInput(input) {
+    this.client.sendUserMessage(input);
+  }
+  async stop() {
+    this.child.kill("SIGTERM");
+    return this.exited;
+  }
+};
+var ClaudeCodeClient = class {
+  constructor(child, options) {
+    this.child = child;
+    this.options = options;
+    this.initPromise = new Promise((resolve, reject) => {
+      this.initResolve = resolve;
+      this.initReject = reject;
+    });
+    const stdout = (0, import_node_readline2.createInterface)({ input: child.stdout });
+    stdout.on("line", (line) => this.handleStdoutLine(line));
+    const stderr = (0, import_node_readline2.createInterface)({ input: child.stderr });
+    stderr.on("line", (line) => {
+      if (line.trim()) {
+        this.options.onOutput("stderr", `${line}
+`);
+      }
+    });
+    child.on("exit", (exitCode) => {
+      this.options.onExit(exitCode ?? 0);
+    });
+    child.on("error", (error) => {
+      this.initReject(error instanceof Error ? error : new Error(String(error)));
+      this.options.onExit(1);
+    });
+    setTimeout(() => {
+      if (!this.sessionId) {
+        this.initReject(new Error("Timed out waiting for Claude Code system/init event"));
+      }
+    }, 3e4);
+  }
+  sessionId;
+  initPromise;
+  initResolve;
+  initReject;
+  turnInFlight = false;
+  streamedMessageText = "";
+  waitForInit() {
+    return this.initPromise;
+  }
+  getSessionId() {
+    return this.sessionId;
+  }
+  sendUserMessage(text) {
+    const message = {
+      type: "user",
+      message: {
+        role: "user",
+        content: [{ type: "text", text }]
+      }
+    };
+    this.child.stdin.write(`${JSON.stringify(message)}
+`);
+    this.turnInFlight = true;
+  }
+  sendControlResponse(requestId, behavior, message) {
+    const response = { behavior };
+    if (message && behavior === "deny") {
+      response.message = message;
+    }
+    const controlResponse = {
+      type: "control_response",
+      response: {
+        subtype: "success",
+        request_id: requestId,
+        response
+      }
+    };
+    this.child.stdin.write(`${JSON.stringify(controlResponse)}
+`);
+  }
+  handleStdoutLine(line) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
+    }
+    try {
+      const event = JSON.parse(trimmed);
+      this.dispatchEvent(event);
+    } catch {
+      this.options.onOutput("stdout", `${line}
+`);
+    }
+  }
+  dispatchEvent(event) {
+    switch (event.type) {
+      case "system":
+        if (event.subtype === "init") {
+          this.sessionId = event.session_id;
+          this.initResolve(event);
+        }
+        break;
+      case "assistant":
+        this.handleAssistantEvent(event);
+        break;
+      case "user":
+        this.handleUserEvent(event);
+        break;
+      case "control_request":
+        this.handleControlRequest(event);
+        break;
+      case "result":
+        this.handleResult(event);
+        break;
+      case "stream_event":
+        this.handleStreamEvent(event);
+        break;
+      default:
+        this.options.onOutput("stdout", `${JSON.stringify(event)}
+`);
+        break;
+    }
+  }
+  handleAssistantEvent(event) {
+    this.streamedMessageText = "";
+    for (const block of event.message.content) {
+      if (block.type === "text") {
+        this.options.onOutput("stdout", block.text);
+      } else if (block.type === "tool_use") {
+        this.options.onOutput(
+          "stdout",
+          `
+[Tool: ${block.name}]
+`
+        );
+        try {
+          this.options.onOutput(
+            "stdout",
+            JSON.stringify(block.input, null, 2) + "\n"
+          );
+        } catch {
+          this.options.onOutput("stdout", `${String(block.input)}
+`);
+        }
+      }
+    }
+    if (event.message.usage) {
+      this.options.onOutput(
+        "stdout",
+        `
+[Tokens: in=${event.message.usage.input_tokens}, out=${event.message.usage.output_tokens}]
+`
+      );
+    }
+  }
+  handleUserEvent(event) {
+    for (const block of event.message.content) {
+      if (block.type === "tool_result") {
+        const prefix = block.is_error ? "[Tool Error]" : "[Tool Result]";
+        this.options.onOutput("stdout", `
+${prefix}:
+`);
+        try {
+          const content = typeof block.content === "string" ? block.content : JSON.stringify(block.content);
+          const truncated = content.length > 2e3 ? content.slice(0, 2e3) + "\n... (truncated)" : content;
+          this.options.onOutput("stdout", truncated + "\n");
+        } catch {
+          this.options.onOutput("stdout", `${String(block.content)}
+`);
+        }
+      }
+    }
+  }
+  handleControlRequest(event) {
+    if (this.options.autoAllowTools) {
+      this.sendControlResponse(event.request_id, "allow");
+      this.options.onOutput(
+        "stdout",
+        `
+[Auto-allowed: ${event.request.tool_name}]
+`
+      );
+    } else {
+      this.sendControlResponse(event.request_id, "deny", "Tool use denied in non-interactive mode");
+      this.options.onOutput(
+        "stderr",
+        `
+[Tool denied: ${event.request.tool_name} \u2014 ${event.request.decision_reason ?? "not in allowlist"}]
+`
+      );
+    }
+  }
+  handleResult(event) {
+    this.turnInFlight = false;
+    if (event.subtype === "success" && event.result) {
+      try {
+        const parsed = JSON.parse(event.result);
+        if (typeof parsed === "string" && parsed.trim()) {
+          this.options.onOutput("stdout", `
+${parsed}
+`);
+        }
+      } catch {
+      }
+    }
+    if (event.subtype === "error") {
+      const errorText = event.errors?.join("; ") ?? "Unknown error";
+      this.options.onOutput("stderr", `
+[Error: ${errorText}]
+`);
+    }
+  }
+  handleStreamEvent(event) {
+    const inner = event.event;
+    if (inner.type === "content_block_delta" && inner.delta?.type === "text_delta" && inner.delta.text) {
+      this.streamedMessageText += inner.delta.text;
+      this.options.onOutput("stdout", inner.delta.text);
+    }
+  }
+};
+async function createClaudeCodeProcess(input) {
+  const client = new ClaudeCodeClient(input.child, input.options);
+  await client.waitForInit();
+  const exited = new Promise((resolve) => {
+    input.child.on("exit", (exitCode) => resolve(exitCode ?? 0));
+  });
+  return new ClaudeCodeProcess(client, input.child, exited);
+}
+
+// ../agent-host/src/claude/sessionDiscovery.ts
+var import_node_fs = require("node:fs");
+var import_promises = require("node:fs/promises");
+var import_node_os = require("node:os");
+var import_node_path = require("node:path");
+var import_node_readline3 = require("node:readline");
+async function discoverClaudeCodeSessions(options) {
+  const projectSlug = workspaceToProjectSlug(options.workspace);
+  const projectDir = (0, import_node_path.join)((0, import_node_os.homedir)(), ".claude", "projects", projectSlug);
+  let entries;
+  try {
+    entries = await (0, import_promises.readdir)(projectDir);
+  } catch {
+    return [];
+  }
+  const maxLines = options.maxLineReadPerFile ?? 50;
+  const sessions = [];
+  for (const entry of entries) {
+    if (!entry.endsWith(".jsonl")) continue;
+    const sessionId = entry.replace(/\.jsonl$/, "");
+    const filePath = (0, import_node_path.join)(projectDir, entry);
+    let fileStat;
+    try {
+      fileStat = await (0, import_promises.stat)(filePath);
+    } catch {
+      continue;
+    }
+    let title;
+    try {
+      title = await extractSessionTitle(filePath, maxLines);
+    } catch {
+    }
+    sessions.push({
+      id: sessionId,
+      workspace: options.workspace,
+      title,
+      updatedAt: fileStat.mtime.toISOString()
+    });
+  }
+  return sessions;
+}
+function workspaceToProjectSlug(workspace) {
+  return workspace.replace(/:/g, "-").replace(/[\\/]/g, "-");
+}
+async function extractSessionTitle(filePath, maxLines) {
+  const stream = (0, import_node_fs.createReadStream)(filePath, { encoding: "utf-8" });
+  const rl = (0, import_node_readline3.createInterface)({ input: stream, crlfDelay: Infinity });
+  let aiTitle;
+  let firstUserText;
+  let lineCount = 0;
+  for await (const line of rl) {
+    lineCount++;
+    if (lineCount > maxLines) break;
+    try {
+      const event = JSON.parse(line);
+      if (event.type === "ai-title" && typeof event.aiTitle === "string" && event.aiTitle.trim()) {
+        aiTitle = event.aiTitle.trim();
+      }
+      if (!firstUserText && event.type === "user" && isUserMessage(event.message)) {
+        const text = firstTextContent(event.message);
+        if (text) {
+          firstUserText = text.trim();
+        }
+      }
+    } catch {
+    }
+  }
+  const title = aiTitle ?? firstUserText;
+  if (!title) return void 0;
+  return title.length > 80 ? title.slice(0, 80) + "..." : title;
+}
+function isUserMessage(message) {
+  if (!message || typeof message !== "object") return false;
+  const m = message;
+  return m.role === "user" && Array.isArray(m.content);
+}
+function firstTextContent(message) {
+  for (const block of message.content) {
+    if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
+      return block.text;
+    }
+  }
+  return void 0;
+}
+
+// ../agent-host/src/claude/sessionTailer.ts
+var import_node_fs2 = require("node:fs");
+var import_node_readline4 = require("node:readline");
+async function replaySessionHistory(options) {
+  const stream = (0, import_node_fs2.createReadStream)(options.filePath, { encoding: "utf-8" });
+  const rl = (0, import_node_readline4.createInterface)({ input: stream, crlfDelay: Infinity });
+  let count = 0;
+  for await (const line of rl) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const event = JSON.parse(trimmed);
+      if (options.untilUuid && event.uuid === options.untilUuid) {
+        break;
+      }
+      if (options.since && typeof event.timestamp === "string" && event.timestamp <= options.since) {
+        continue;
+      }
+      const text = formatEventAsOutput(event);
+      if (text !== null) {
+        options.onOutput("stdout", text);
+        count++;
+      }
+    } catch {
+    }
+  }
+  return count;
+}
+function formatEventAsOutput(event) {
+  switch (event.type) {
+    case "assistant":
+      return formatAssistantEvent(event);
+    case "user":
+      return formatUserEvent(event);
+    case "result":
+      return formatResultEvent(event);
+    case "stream_event":
+      return formatStreamEvent(event);
+    default:
+      return null;
+  }
+}
+function formatAssistantEvent(event) {
+  const message = event.message;
+  if (!message || message.role !== "assistant") return null;
+  const content = message.content;
+  if (!Array.isArray(content)) return null;
+  const parts = [];
+  for (const block of content) {
+    if (block.type === "text" && typeof block.text === "string") {
+      parts.push(block.text);
+    } else if (block.type === "tool_use") {
+      parts.push(`
+[Tool: ${block.name}]`);
+      try {
+        parts.push(JSON.stringify(block.input, null, 2));
+      } catch {
+        parts.push(String(block.input));
+      }
+      parts.push("");
+    }
+  }
+  return parts.length > 0 ? parts.join("") : null;
+}
+function formatUserEvent(event) {
+  const message = event.message;
+  if (!message || message.role !== "user") return null;
+  const content = message.content;
+  if (!Array.isArray(content)) return null;
+  const parts = [];
+  for (const block of content) {
+    if (block.type === "tool_result") {
+      const prefix = block.is_error ? "[Tool Error]" : "[Tool Result]";
+      parts.push(`
+${prefix}:
+`);
+      try {
+        const text = typeof block.content === "string" ? block.content : JSON.stringify(block.content);
+        const truncated = text.length > 2e3 ? text.slice(0, 2e3) + "\n... (truncated)" : text;
+        parts.push(truncated);
+      } catch {
+        parts.push(String(block.content));
+      }
+      parts.push("");
+    }
+  }
+  return parts.length > 0 ? parts.join("") : null;
+}
+function formatResultEvent(event) {
+  if (event.subtype === "success" && typeof event.result === "string") {
+    try {
+      const parsed = JSON.parse(event.result);
+      if (typeof parsed === "string" && parsed.trim()) {
+        return `
+${parsed}
+`;
+      }
+    } catch {
+    }
+    return null;
+  }
+  if (event.subtype === "error") {
+    const errors = event.errors;
+    return `
+[Error: ${errors?.join("; ") ?? "Unknown error"}]
+`;
+  }
+  return null;
+}
+function formatStreamEvent(event) {
+  const inner = event.event;
+  if (!inner) return null;
+  if (inner.type === "content_block_delta" && inner.delta?.type === "text_delta" && typeof inner.delta?.text === "string") {
+    return inner.delta.text;
+  }
+  return null;
+}
+
+// ../agent-host/src/adapters/claudeCodeAdapter.ts
+var ClaudeCodeAdapter = class {
+  constructor(options) {
+    this.options = options;
+  }
+  id = "claude-code";
+  displayName = "Claude Code";
+  async start(options) {
+    const child = this.spawnClaudeCode({
+      workspace: options.workspace,
+      sessionId: options.sessionId
+    });
+    return createClaudeCodeProcess({
+      child,
+      options: {
+        cwd: options.workspace,
+        onOutput: options.onOutput,
+        onExit: options.onExit,
+        autoAllowTools: this.options.autoAllowTools ?? true
+      }
+    });
+  }
+  async discoverSessions(options) {
+    return discoverClaudeCodeSessions({ workspace: options.workspace });
+  }
+  async attachSession(options) {
+    const shouldReplay = this.options.replayHistory ?? true;
+    if (shouldReplay) {
+      const projectSlug = workspaceToProjectSlug2(options.workspace);
+      const filePath = (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".claude", "projects", projectSlug, `${options.externalId}.jsonl`);
+      try {
+        const replayed = await replaySessionHistory({
+          filePath,
+          onOutput: options.onOutput
+        });
+        if (replayed > 0) {
+          options.onOutput(
+            "stdout",
+            `
+--- \u4EE5\u4E0A\u4E3A\u5386\u53F2\u4F1A\u8BDD\u5185\u5BB9 (${replayed} \u6761\u6D88\u606F) ---
+
+`
+          );
+        }
+      } catch {
+      }
+    }
+    const child = this.spawnClaudeCode({
+      workspace: options.workspace,
+      sessionId: options.sessionId,
+      resumeSessionId: options.externalId
+    });
+    return createClaudeCodeProcess({
+      child,
+      options: {
+        cwd: options.workspace,
+        onOutput: options.onOutput,
+        onExit: options.onExit,
+        autoAllowTools: this.options.autoAllowTools ?? true
+      }
+    });
+  }
+  spawnClaudeCode(params) {
+    const command = this.options.command;
+    const permissionMode = this.options.permissionMode ?? "acceptEdits";
+    const args = [
+      "--print",
+      "--output-format",
+      "stream-json",
+      "--input-format",
+      "stream-json",
+      "--verbose",
+      "--include-partial-messages",
+      "--permission-mode",
+      permissionMode
+    ];
+    if (params.resumeSessionId) {
+      args.push("--resume", params.resumeSessionId);
+    } else {
+      args.push("--name", params.sessionId);
+    }
+    if (this.options.args && this.options.args.length > 0) {
+      args.push(...this.options.args);
+    }
+    return (0, import_node_child_process2.spawn)(command, args, {
+      cwd: params.workspace,
+      shell: process.platform === "win32",
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env }
+    });
+  }
+};
+function workspaceToProjectSlug2(workspace) {
+  return workspace.replace(/:/g, "-").replace(/[\\/]/g, "-");
+}
+
 // ../agent-host/src/relayClient.ts
 function startRelayClient(options) {
   const url = new URL("/host", options.relayUrl);
@@ -46505,13 +47043,28 @@ var NonRunningSessionError = class extends Error {
 var SessionManager = class {
   constructor(options) {
     this.options = options;
+    const adapterList = options.adapters ?? (options.adapter ? [options.adapter] : []);
+    for (const a of adapterList) {
+      this.adapters.set(a.id, a);
+    }
   }
   sessions = /* @__PURE__ */ new Map();
   events = [];
   approvals = /* @__PURE__ */ new Map();
   subscribers = /* @__PURE__ */ new Set();
+  adapters = /* @__PURE__ */ new Map();
   seq = 0;
-  desktopSyncError;
+  desktopSyncErrors = /* @__PURE__ */ new Map();
+  getAdapterIds() {
+    return Array.from(this.adapters.keys());
+  }
+  getPrimaryAdapterId() {
+    const first = this.adapters.keys().next().value;
+    if (!first) {
+      throw new Error("No adapters registered");
+    }
+    return first;
+  }
   async loadFromStorage() {
     if (!this.options.storage) {
       return;
@@ -46539,65 +47092,86 @@ var SessionManager = class {
     }
   }
   listSessions() {
-    return Array.from(this.sessions.values()).map((record) => record.summary);
+    return Array.from(this.sessions.values()).map((record) => record.summary).sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
   }
   async syncDesktopSessions() {
-    let discovered;
-    try {
-      discovered = await this.options.adapter.discoverSessions?.({ workspace: this.options.workspace });
-      this.desktopSyncError = void 0;
-    } catch (error) {
-      this.desktopSyncError = error instanceof Error ? error.message : String(error);
-      return;
-    }
-    if (!discovered) {
-      return;
-    }
-    const workspaceSessions = discovered.filter(
-      (item) => normalizePath(item.workspace) === normalizePath(this.options.workspace)
-    );
-    const discoveredExternalIds = new Set(workspaceSessions.map((session) => session.id));
-    for (const [sessionId, record] of this.sessions.entries()) {
-      if (record.summary.adapterId !== this.options.adapter.id || !record.externalId || normalizePath(record.summary.workspace) !== normalizePath(this.options.workspace)) {
+    for (const [adapterId, adapter] of this.adapters.entries()) {
+      if (!adapter.discoverSessions) {
         continue;
       }
-      if (!discoveredExternalIds.has(record.externalId) && !record.process) {
-        this.sessions.delete(sessionId);
-      }
-    }
-    for (const session of workspaceSessions) {
-      const sessionId = `${this.options.adapter.id}_${session.id}`;
-      const existing = this.sessions.get(sessionId);
-      if (existing) {
-        existing.externalId = session.id;
-        existing.summary.title = session.title;
-        if (existing.summary.status !== "running") {
-          existing.summary.status = "running";
-          existing.process = void 0;
-        }
+      let discovered;
+      try {
+        discovered = await adapter.discoverSessions({ workspace: this.options.workspace });
+        this.desktopSyncErrors.delete(adapterId);
+      } catch (error) {
+        this.desktopSyncErrors.set(adapterId, error instanceof Error ? error.message : String(error));
         continue;
       }
-      this.sessions.set(sessionId, {
-        externalId: session.id,
-        summary: {
-          id: sessionId,
-          adapterId: this.options.adapter.id,
-          title: session.title,
-          workspace: session.workspace,
-          status: "running",
-          startedAt: session.updatedAt ?? (/* @__PURE__ */ new Date()).toISOString(),
-          lastSeq: this.seq
+      if (!discovered) {
+        continue;
+      }
+      const workspaceSessions = discovered.filter(
+        (item) => normalizePath(item.workspace) === normalizePath(this.options.workspace)
+      );
+      const discoveredExternalIds = new Set(workspaceSessions.map((session) => session.id));
+      for (const [sessionId, record] of this.sessions.entries()) {
+        if (record.summary.adapterId !== adapterId || !record.externalId || normalizePath(record.summary.workspace) !== normalizePath(this.options.workspace)) {
+          continue;
         }
-      });
+        if (!discoveredExternalIds.has(record.externalId) && !record.process) {
+          this.sessions.delete(sessionId);
+        }
+      }
+      for (const session of workspaceSessions) {
+        const sessionId = `${adapterId}_${session.id}`;
+        const existing = this.sessions.get(sessionId);
+        if (existing) {
+          existing.externalId = session.id;
+          existing.summary.title = session.title;
+          if (existing.summary.status !== "running") {
+            existing.summary.status = "running";
+            existing.process = void 0;
+          }
+          continue;
+        }
+        this.sessions.set(sessionId, {
+          externalId: session.id,
+          summary: {
+            id: sessionId,
+            adapterId,
+            title: session.title,
+            workspace: session.workspace,
+            status: "running",
+            startedAt: session.updatedAt ?? (/* @__PURE__ */ new Date()).toISOString(),
+            lastSeq: this.seq
+          }
+        });
+      }
     }
   }
-  getAdapterAvailability() {
-    return this.desktopSyncError ? "missing" : "available";
+  getAdapterAvailability(adapterId) {
+    const id = adapterId ?? this.getPrimaryAdapterId();
+    if (!this.adapters.has(id)) {
+      return "unknown";
+    }
+    return this.desktopSyncErrors.has(id) ? "missing" : "available";
   }
-  async createSession() {
+  getAdaptersAvailability() {
+    const result = /* @__PURE__ */ new Map();
+    for (const id of this.adapters.keys()) {
+      result.set(id, this.getAdapterAvailability(id));
+    }
+    return result;
+  }
+  async createSession(adapterId) {
+    const id = adapterId ?? this.getPrimaryAdapterId();
+    const adapter = this.adapters.get(id);
+    if (!adapter) {
+      throw new Error(`Unknown adapter ${id}`);
+    }
     const sessionId = `sess_${nanoid(10)}`;
     const startedAt = (/* @__PURE__ */ new Date()).toISOString();
-    const process2 = await this.options.adapter.start({
+    const process2 = await adapter.start({
       sessionId,
       workspace: this.options.workspace,
       onOutput: (_stream, text) => {
@@ -46624,7 +47198,7 @@ var SessionManager = class {
     });
     const summary = {
       id: sessionId,
-      adapterId: this.options.adapter.id,
+      adapterId: adapter.id,
       workspace: this.options.workspace,
       status: "running",
       startedAt,
@@ -46766,10 +47340,15 @@ var SessionManager = class {
     return record;
   }
   async attachDesktopSession(sessionId, externalId) {
-    if (!this.options.adapter.attachSession) {
-      throw new Error(`Adapter ${this.options.adapter.id} cannot attach sessions`);
+    const record = this.requireSession(sessionId);
+    const adapter = this.adapters.get(record.summary.adapterId);
+    if (!adapter) {
+      throw new Error(`Unknown adapter ${record.summary.adapterId}`);
     }
-    return this.options.adapter.attachSession({
+    if (!adapter.attachSession) {
+      throw new Error(`Adapter ${adapter.id} cannot attach sessions`);
+    }
+    return adapter.attachSession({
       externalId,
       sessionId,
       workspace: this.options.workspace,
@@ -46781,12 +47360,12 @@ var SessionManager = class {
         });
       },
       onExit: (exitCode) => {
-        const record = this.sessions.get(sessionId);
-        if (record) {
-          record.process = void 0;
+        const record2 = this.sessions.get(sessionId);
+        if (record2) {
+          record2.process = void 0;
         }
-        if (record?.summary.status === "running") {
-          record.summary.status = exitCode === 0 ? "exited" : "failed";
+        if (record2?.summary.status === "running") {
+          record2.summary.status = exitCode === 0 ? "exited" : "failed";
           this.appendEvent({
             type: "session.finished",
             sessionId,
@@ -46904,7 +47483,7 @@ function buildServer(options) {
       },
       devices: trustedDevices.map(toDeviceSummary),
       trustedDevices: request.headers["x-agent-mobile-pairing-token"] === options.pairingToken || isLoopbackRequest(request) ? trustedDevices : [],
-      agents: buildAgentSummaries(sessions, options.manager.getAdapterAvailability()),
+      agents: buildAgentSummaries(sessions, options.manager.getAdaptersAvailability()),
       sessions
     };
   });
@@ -47015,12 +47594,15 @@ function buildServer(options) {
   });
   return app;
 }
-function buildAgentSummaries(sessions, codexAvailability) {
-  return [
-    buildAgentSummary("codex", "Codex", sessions, codexAvailability),
-    buildAgentSummary("claude-code", "Claude Code", sessions),
-    buildAgentSummary("opencode", "OpenCode", sessions)
+function buildAgentSummaries(sessions, adapterAvailability) {
+  const knownAgents = [
+    { id: "codex", displayName: "Codex" },
+    { id: "claude-code", displayName: "Claude Code" },
+    { id: "opencode", displayName: "OpenCode" }
   ];
+  return knownAgents.map(
+    (agent) => buildAgentSummary(agent.id, agent.displayName, sessions, adapterAvailability.get(agent.id) ?? "unknown")
+  );
 }
 function buildAgentSummary(id, displayName, sessions, availability = "unknown") {
   const matching = sessions.filter((session) => session.adapterId === id);
@@ -47112,6 +47694,8 @@ async function main() {
   const host = readArg("--host") ?? process.env.AGENT_MOBILE_HOST ?? "127.0.0.1";
   const workspace = readArg("--workspace") ?? process.cwd();
   const codexCommand = readArg("--codex-command") ?? "codex";
+  const claudeCodeCommand = readArg("--claude-code-command") ?? "claude";
+  const enableClaudeCode = readArg("--enable-claude-code") ?? "true";
   const eventCacheSize = Number(readArg("--event-cache-size") ?? 500);
   const pairingToken = readArg("--pairing-token") ?? `pair_${(0, import_node_crypto3.randomBytes)(18).toString("hex")}`;
   const relayUrl = readArg("--relay-url") ?? process.env.AGENT_MOBILE_RELAY_URL;
@@ -47119,8 +47703,12 @@ async function main() {
   const relayToken = readArg("--relay-token") ?? process.env.AGENT_MOBILE_RELAY_TOKEN;
   const trustedDevices = parseTrustedDevicesArgument(readArg("--trusted-devices"));
   const advertisedHost = host === "0.0.0.0" ? firstLanAddress() ?? "127.0.0.1" : host;
+  const adapters = [new CodexAdapter({ command: codexCommand, args: [] })];
+  if (enableClaudeCode !== "false" && enableClaudeCode !== "0") {
+    adapters.push(new ClaudeCodeAdapter({ command: claudeCodeCommand }));
+  }
   const manager = new SessionManager({
-    adapter: new CodexAdapter({ command: codexCommand, args: [] }),
+    adapters,
     workspace,
     eventCacheSize
   });
@@ -47163,7 +47751,7 @@ function parseTrustedDevicesArgument(value) {
   return trustedDeviceRecordListSchema.parse(JSON.parse(value));
 }
 function firstLanAddress() {
-  for (const infos of Object.values((0, import_node_os.networkInterfaces)())) {
+  for (const infos of Object.values((0, import_node_os3.networkInterfaces)())) {
     for (const info of infos ?? []) {
       if (info.family === "IPv4" && !info.internal) {
         return info.address;

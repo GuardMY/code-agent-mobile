@@ -4,9 +4,10 @@ import { networkInterfaces } from "node:os";
 import { z } from "zod";
 import { trustedDeviceRecordSchema, type TrustedDeviceRecord } from "@agent-mobile/protocol";
 import { CodexAdapter } from "./adapters/codexAdapter.js";
+import { ClaudeCodeAdapter } from "./adapters/claudeCodeAdapter.js";
 import { startRelayClient } from "./relayClient.js";
 import { buildServer } from "./server.js";
-import { SessionManager } from "./sessions/sessionManager.js";
+import { SessionManager, type AgentAdapter } from "./sessions/sessionManager.js";
 
 const trustedDeviceRecordListSchema = z.array(trustedDeviceRecordSchema);
 
@@ -22,6 +23,8 @@ async function main(): Promise<void> {
   const host = readArg("--host") ?? process.env.AGENT_MOBILE_HOST ?? "127.0.0.1";
   const workspace = readArg("--workspace") ?? process.cwd();
   const codexCommand = readArg("--codex-command") ?? "codex";
+  const claudeCodeCommand = readArg("--claude-code-command") ?? "claude";
+  const enableClaudeCode = readArg("--enable-claude-code") ?? "true";
   const eventCacheSize = Number(readArg("--event-cache-size") ?? 500);
   const pairingToken = readArg("--pairing-token") ?? `pair_${randomBytes(18).toString("hex")}`;
   const relayUrl = readArg("--relay-url") ?? process.env.AGENT_MOBILE_RELAY_URL;
@@ -29,8 +32,14 @@ async function main(): Promise<void> {
   const relayToken = readArg("--relay-token") ?? process.env.AGENT_MOBILE_RELAY_TOKEN;
   const trustedDevices = parseTrustedDevicesArgument(readArg("--trusted-devices"));
   const advertisedHost = host === "0.0.0.0" ? firstLanAddress() ?? "127.0.0.1" : host;
+
+  const adapters: AgentAdapter[] = [new CodexAdapter({ command: codexCommand, args: [] })];
+  if (enableClaudeCode !== "false" && enableClaudeCode !== "0") {
+    adapters.push(new ClaudeCodeAdapter({ command: claudeCodeCommand }));
+  }
+
   const manager = new SessionManager({
-    adapter: new CodexAdapter({ command: codexCommand, args: [] }),
+    adapters,
     workspace,
     eventCacheSize
   });
