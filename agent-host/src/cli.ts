@@ -89,6 +89,9 @@ function firstLanAddress(): string | undefined {
   return undefined;
 }
 
-function isDirectExecution(moduleUrl: string, entryArg: string | undefined): boolean {
+function isDirectExecution(moduleUrl: string | undefined, entryArg: string | undefined): boolean {
+  // When bundled as CJS (e.g. by esbuild), import.meta.url is undefined.
+  // In that case the bundle is always executed directly, never imported.
+  if (!moduleUrl) return true;
   return Boolean(entryArg && fileURLToPath(moduleUrl) === entryArg);
 }

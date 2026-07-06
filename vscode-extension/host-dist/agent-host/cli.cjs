@@ -47173,6 +47173,7 @@ function firstLanAddress() {
   return void 0;
 }
 function isDirectExecution(moduleUrl, entryArg) {
+  if (!moduleUrl) return true;
   return Boolean(entryArg && (0, import_node_url.fileURLToPath)(moduleUrl) === entryArg);
 }
 // Annotate the CommonJS export names for ESM import in node:

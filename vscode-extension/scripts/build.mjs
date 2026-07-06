@@ -44,5 +44,10 @@ await build({
   platform: "node",
   target: "node20",
   sourcemap: false,
-  logLevel: "info"
+  logLevel: "info",
+  // import.meta.url is unavailable in CJS format; cli.ts guards against
+  // undefined at runtime via the isDirectExecution helper, so this is safe.
+  logOverride: {
+    "empty-import-meta": "silent"
+  }
 });
