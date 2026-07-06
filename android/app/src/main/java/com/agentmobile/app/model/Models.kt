@@ -11,6 +11,8 @@ data class ConnectionInfo(
     val host: String,
     val port: Int,
     val accessToken: String,
+    val deviceId: String? = null,
+    val deviceSecret: String? = null,
     val relayUrl: String? = null,
     val hostId: String? = null,
     val relayToken: String? = null

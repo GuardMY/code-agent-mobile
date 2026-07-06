@@ -12,6 +12,7 @@ import com.agentmobile.app.model.SessionSummary
 import com.agentmobile.app.net.AgentMobileApi
 import com.agentmobile.app.net.AgentMobileClient
 import com.agentmobile.app.net.PairingParser
+import com.agentmobile.app.net.UnauthorizedException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -48,28 +49,34 @@ class ConsoleViewModel(
     private var socket: WebSocket? = null
     private var reconnectAttempts = 0
 
+    private data class AuthorizedResult<T>(
+        val connection: ConnectionInfo,
+        val value: T
+    )
+
     fun connect(pairingJson: String) {
         viewModelScope.launch(ioDispatcher) {
             runCatching {
                 val payload: PairingPayload = PairingParser.parse(pairingJson)
                 val connection = client.pair(payload.host, payload.port, payload.pairingToken, "android")
-                val status = client.getStatus(connection)
-                connection to status
-            }.onSuccess { (connection, status) ->
+                withReauth(connection) { current -> client.getStatus(current) }
+            }.onSuccess { result ->
+                val activeConnection = result.connection
+                val status = result.value
                 val lastSeq = status.sessions.maxOfOrNull { it.lastSeq } ?: 0
                 _state.update {
                     it.copy(
-                        connection = connection,
+                        connection = activeConnection,
                         agents = status.agents,
                         sessions = status.sessions,
                         session = null,
                         showingSessionDetail = false,
-                        lastSeq = maxOf(it.lastSeq, lastSeq),
+                        lastSeq = lastSeq,
                         connected = true,
                         error = null
                     )
                 }
-                reconnectStream(connection)
+                reconnectStream(activeConnection)
             }.onFailure { error ->
                 _state.update { it.copy(error = error.message, connected = false) }
             }
@@ -82,9 +89,11 @@ class ConsoleViewModel(
         _state.update { it.copy(session = selected, showingSessionDetail = true, error = null) }
         viewModelScope.launch(ioDispatcher) {
             runCatching {
-                val history = client.listEvents(connection, 0)
+                val history = withReauth(connection) { current -> client.listEvents(current, 0) }.value
                     .filter { it.sessionId == null || it.sessionId == sessionId }
-                client.attachSession(connection, sessionId)
+                withReauth(_state.value.connection ?: connection) { current ->
+                    client.attachSession(current, sessionId)
+                }.value
                 history
             }.onSuccess { history ->
                 _state.update {
@@ -116,7 +125,11 @@ class ConsoleViewModel(
             it.copy(lines = it.lines + ConsoleLine(nextLocalSeq(it.lines), trimmedText, ConsoleLineRole.USER, session.id), error = null)
         }
         viewModelScope.launch(ioDispatcher) {
-            runCatching { client.sendInput(connection, session.id, trimmedText) }
+            runCatching {
+                withReauth(connection) { current ->
+                    client.sendInput(current, session.id, trimmedText)
+                }.value
+            }
                 .onFailure { error -> _state.update { it.copy(error = error.message) } }
         }
     }
@@ -126,7 +139,11 @@ class ConsoleViewModel(
         val session = _state.value.session ?: return
         if (session.status != "running") return
         viewModelScope.launch(ioDispatcher) {
-            runCatching { client.stopSession(connection, session.id) }
+            runCatching {
+                withReauth(connection) { current ->
+                    client.stopSession(current, session.id)
+                }.value
+            }
                 .onFailure { error -> _state.update { it.copy(error = error.message) } }
         }
     }
@@ -134,7 +151,11 @@ class ConsoleViewModel(
     fun respondApproval(approvalId: String, decision: String) {
         val connection = _state.value.connection ?: return
         viewModelScope.launch(ioDispatcher) {
-            runCatching { client.respondApproval(connection, approvalId, decision) }
+            runCatching {
+                withReauth(connection) { current ->
+                    client.respondApproval(current, approvalId, decision)
+                }.value
+            }
                 .onSuccess {
                     _state.update { state ->
                         state.copy(approvals = state.approvals.filterNot { it.approvalId == approvalId }, error = null)
@@ -219,6 +240,14 @@ class ConsoleViewModel(
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 _state.update { it.copy(connected = false, error = t.message) }
+                if (response?.code == 401) {
+                    viewModelScope.launch(ioDispatcher) {
+                        runCatching { reauthConnection(connection) }
+                            .onSuccess { refreshed -> reconnectStream(refreshed) }
+                            .onFailure { error -> _state.update { it.copy(error = error.message, connected = false) } }
+                    }
+                    return
+                }
                 scheduleReconnect(connection)
             }
         })
@@ -232,6 +261,32 @@ class ConsoleViewModel(
         viewModelScope.launch(ioDispatcher) {
             delay(reconnectDelayMs)
             reconnectStream(connection)
+        }
+    }
+
+    private fun <T> withReauth(connection: ConnectionInfo, block: (ConnectionInfo) -> T): AuthorizedResult<T> =
+        try {
+            AuthorizedResult(connection, block(connection))
+        } catch (error: UnauthorizedException) {
+            val refreshed = reauthConnection(connection)
+            AuthorizedResult(refreshed, block(refreshed))
+        }
+
+    private fun reauthConnection(connection: ConnectionInfo): ConnectionInfo {
+        val latestConnection = latestConnectionForReauth(connection)
+        val refreshed = client.reauth(latestConnection)
+        _state.update { current ->
+            current.copy(connection = refreshed, connected = true, error = null)
+        }
+        return refreshed
+    }
+
+    private fun latestConnectionForReauth(fallback: ConnectionInfo): ConnectionInfo {
+        val current = _state.value.connection ?: return fallback
+        return if (current.host == fallback.host && current.port == fallback.port) {
+            current
+        } else {
+            fallback
         }
     }
 

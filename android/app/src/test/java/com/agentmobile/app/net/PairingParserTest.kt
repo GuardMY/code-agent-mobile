@@ -12,7 +12,8 @@ class PairingParserTest {
               "host": "192.168.1.10",
               "port": 17365,
               "pairingToken": "pairing-token-123",
-              "deviceName": "VS Code"
+              "deviceName": "VS Code",
+              "ignoredFutureField": "keeps parser compatible"
             }
             """.trimIndent()
         )
@@ -20,6 +21,7 @@ class PairingParserTest {
         assertEquals("192.168.1.10", payload.host)
         assertEquals(17365, payload.port)
         assertEquals("pairing-token-123", payload.pairingToken)
+        assertEquals("VS Code", payload.deviceName)
     }
 
     @Test(expected = IllegalArgumentException::class)

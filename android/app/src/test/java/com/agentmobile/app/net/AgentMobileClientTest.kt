@@ -5,19 +5,54 @@ import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import com.agentmobile.app.model.ConnectionInfo
+import org.json.JSONObject
 
 class AgentMobileClientTest {
     @Test
-    fun pairCallsPairEndpointAndReturnsAccessToken() {
+    fun pairCallsPairEndpointAndReturnsDeviceCredentials() {
         MockWebServer().use { server ->
-            server.enqueue(MockResponse().setBody("""{"accessToken":"access_123"}"""))
+            server.enqueue(
+                MockResponse().setBody(
+                    """{"accessToken":"access_123","deviceId":"android-001","deviceSecret":"secret_123"}"""
+                )
+            )
             server.start()
             val client = AgentMobileClient()
 
             val info = client.pair(server.hostName, server.port, "pairing-token-123", "android")
 
             assertEquals("access_123", info.accessToken)
+            assertEquals("android-001", info.deviceId)
+            assertEquals("secret_123", info.deviceSecret)
             assertEquals("/pair", server.takeRequest().path)
+        }
+    }
+
+    @Test
+    fun reauthCallsDevicesReauthEndpointAndReturnsFreshAccessToken() {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("""{"accessToken":"access_456"}"""))
+            server.start()
+            val client = AgentMobileClient()
+
+            val info = client.reauth(
+                ConnectionInfo(
+                    host = server.hostName,
+                    port = server.port,
+                    accessToken = "stale_access",
+                    deviceId = "android-001",
+                    deviceSecret = "secret_123"
+                )
+            )
+
+            assertEquals("access_456", info.accessToken)
+            assertEquals("android-001", info.deviceId)
+            assertEquals("secret_123", info.deviceSecret)
+            val request = server.takeRequest()
+            assertEquals("/devices/reauth", request.path)
+            val payload = JSONObject(request.body.readUtf8())
+            assertEquals("android-001", payload.getString("deviceId"))
+            assertEquals("secret_123", payload.getString("deviceSecret"))
         }
     }
 

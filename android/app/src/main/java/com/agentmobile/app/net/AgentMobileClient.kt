@@ -19,6 +19,7 @@ import org.json.JSONObject
 
 interface AgentMobileApi {
     fun pair(host: String, port: Int, pairingToken: String, deviceId: String): ConnectionInfo
+    fun reauth(connection: ConnectionInfo): ConnectionInfo
     fun getStatus(connection: ConnectionInfo): HostDashboardStatus
     fun listSessions(connection: ConnectionInfo): List<SessionSummary>
     fun listEvents(connection: ConnectionInfo, lastSeq: Long): List<ConsoleLine>
@@ -48,16 +49,42 @@ class AgentMobileClient(
             .post(payload.toRequestBody(jsonType))
             .build()
         http.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "Pairing failed: ${response.code}" }
+            requireSuccessful(response, "Pairing failed")
             val body = JSONObject(response.body!!.string())
-            return ConnectionInfo(host, port, body.getString("accessToken"))
+            return ConnectionInfo(
+                host = host,
+                port = port,
+                accessToken = body.getString("accessToken"),
+                deviceId = body.getString("deviceId"),
+                deviceSecret = body.optString("deviceSecret").ifBlank { null }
+            )
+        }
+    }
+
+    override fun reauth(connection: ConnectionInfo): ConnectionInfo {
+        val payload = JSONObject()
+            .put("deviceId", requireNotNull(connection.deviceId) { "Missing deviceId for reauth" })
+            .put("deviceSecret", requireNotNull(connection.deviceSecret) { "Missing deviceSecret for reauth" })
+            .toString()
+        val request = Request.Builder()
+            .url("http://${connection.host}:${connection.port}/devices/reauth")
+            .post(payload.toRequestBody(jsonType))
+            .build()
+        http.newCall(request).execute().use { response ->
+            requireSuccessful(response, "Reauth failed")
+            val body = JSONObject(response.body!!.string())
+            return connection.copy(
+                accessToken = body.getString("accessToken"),
+                deviceId = body.optString("deviceId").ifBlank { connection.deviceId },
+                deviceSecret = body.optString("deviceSecret").ifBlank { connection.deviceSecret }
+            )
         }
     }
 
     override fun getStatus(connection: ConnectionInfo): HostDashboardStatus {
         val request = authorized(connection, "/status").get().build()
         http.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "Get status failed: ${response.code}" }
+            requireSuccessful(response, "Get status failed")
             val body = JSONObject(response.body!!.string())
             val agents = body.getJSONArray("agents")
             val sessions = body.getJSONArray("sessions")
@@ -71,7 +98,7 @@ class AgentMobileClient(
     override fun listSessions(connection: ConnectionInfo): List<SessionSummary> {
         val request = authorized(connection, "/sessions").get().build()
         http.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "List sessions failed: ${response.code}" }
+            requireSuccessful(response, "List sessions failed")
             val items = JSONArray(response.body!!.string())
             return (0 until items.length()).map { index ->
                 val item = items.getJSONObject(index)
@@ -83,7 +110,7 @@ class AgentMobileClient(
     override fun listEvents(connection: ConnectionInfo, lastSeq: Long): List<ConsoleLine> {
         val request = authorized(connection, "/events?lastSeq=$lastSeq").get().build()
         http.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "List events failed: ${response.code}" }
+            requireSuccessful(response, "List events failed")
             val items = JSONArray(response.body!!.string())
             return (0 until items.length()).mapNotNull { index ->
                 parseConsoleLine(items.getJSONObject(index))
@@ -94,7 +121,7 @@ class AgentMobileClient(
     override fun createSession(connection: ConnectionInfo): SessionSummary {
         val request = authorized(connection, "/sessions").post("{}".toRequestBody(jsonType)).build()
         http.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "Create session failed: ${response.code}" }
+            requireSuccessful(response, "Create session failed")
             val item = JSONObject(response.body!!.string())
             return parseSession(item)
         }
@@ -105,7 +132,7 @@ class AgentMobileClient(
             .post("{}".toRequestBody(jsonType))
             .build()
         http.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "Attach session failed: ${response.code}" }
+            requireSuccessful(response, "Attach session failed")
         }
     }
 
@@ -115,7 +142,7 @@ class AgentMobileClient(
             .post(payload.toRequestBody(jsonType))
             .build()
         http.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "Send input failed: ${response.code}" }
+            requireSuccessful(response, "Send input failed")
         }
     }
 
@@ -125,14 +152,14 @@ class AgentMobileClient(
             .post(payload.toRequestBody(jsonType))
             .build()
         http.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "Stop session failed: ${response.code}" }
+            requireSuccessful(response, "Stop session failed")
         }
     }
 
     override fun listApprovals(connection: ConnectionInfo): List<ApprovalRequest> {
         val request = authorized(connection, "/approvals").get().build()
         http.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "List approvals failed: ${response.code}" }
+            requireSuccessful(response, "List approvals failed")
             val items = JSONArray(response.body!!.string())
             return (0 until items.length()).map { index -> parseApproval(items.getJSONObject(index)) }
         }
@@ -144,14 +171,14 @@ class AgentMobileClient(
             .post(payload.toRequestBody(jsonType))
             .build()
         http.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "Respond approval failed: ${response.code}" }
+            requireSuccessful(response, "Respond approval failed")
         }
     }
 
     override fun listDevices(connection: ConnectionInfo): List<DeviceSummary> {
         val request = authorized(connection, "/devices").get().build()
         http.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "List devices failed: ${response.code}" }
+            requireSuccessful(response, "List devices failed")
             val items = JSONArray(response.body!!.string())
             return (0 until items.length()).map { index ->
                 val item = items.getJSONObject(index)
@@ -169,7 +196,7 @@ class AgentMobileClient(
             .post("{}".toRequestBody(jsonType))
             .build()
         http.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "Revoke device failed: ${response.code}" }
+            requireSuccessful(response, "Revoke device failed")
         }
     }
 
@@ -184,6 +211,16 @@ class AgentMobileClient(
         Request.Builder()
             .url("http://${connection.host}:${connection.port}$path")
             .header("Authorization", "Bearer ${connection.accessToken}")
+
+    private fun requireSuccessful(response: okhttp3.Response, message: String) {
+        if (response.isSuccessful) {
+            return
+        }
+        if (response.code == 401) {
+            throw UnauthorizedException("$message: ${response.code}")
+        }
+        throw IllegalStateException("$message: ${response.code}")
+    }
 
     private fun parseSession(item: JSONObject): SessionSummary =
         SessionSummary(
@@ -232,3 +269,5 @@ class AgentMobileClient(
             timeoutSeconds = if (item.has("timeoutSeconds")) item.getInt("timeoutSeconds") else null
         )
 }
+
+class UnauthorizedException(message: String) : IllegalStateException(message)

@@ -9,6 +9,7 @@ import com.agentmobile.app.model.DeviceSummary
 import com.agentmobile.app.model.HostDashboardStatus
 import com.agentmobile.app.model.SessionSummary
 import com.agentmobile.app.net.AgentMobileApi
+import com.agentmobile.app.net.UnauthorizedException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -16,11 +17,14 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.test.resetMain
+import okhttp3.Protocol
+import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
@@ -59,6 +63,93 @@ class ConsoleViewModelTest {
         assertEquals(9L, viewModel.state.value.lastSeq)
         assertEquals(1, client.openStreamCalls)
         assertEquals(0, client.createSessionCalls)
+    }
+
+    @Test
+    fun connectReauthsAfter401AndRetriesStatus() = runTest(dispatcher) {
+        val client = FakeAgentMobileApi(
+            sessions = listOf(session("sess_new", "running", 9)),
+            failStatusOnceWith401 = true
+        )
+        val viewModel = ConsoleViewModel(client, dispatcher, reconnectDelayMs = 1)
+
+        viewModel.connect(pairingJson())
+        advanceUntilIdle()
+
+        assertTrue(client.reauthCalled)
+        assertEquals("access_456", viewModel.state.value.connection?.accessToken)
+        assertEquals(listOf("access_123", "access_456"), client.statusAccessTokens)
+        assertEquals(true, viewModel.state.value.connected)
+    }
+
+    @Test
+    fun streamReauthUsesLatestRotatedDeviceCredentialsInsteadOfCapturedConnection() = runTest(dispatcher) {
+        val client = FakeAgentMobileApi(
+            sessions = listOf(session("sess_1", "running", 5)),
+            failSendOnceWith401 = true,
+            rotateCredentialsOnReauth = true
+        )
+        val viewModel = ConsoleViewModel(client, dispatcher, reconnectDelayMs = 1)
+
+        viewModel.connect(pairingJson())
+        advanceUntilIdle()
+        val staleListener = client.listener
+        viewModel.selectSession("sess_1")
+        advanceUntilIdle()
+
+        viewModel.send("hello")
+        advanceUntilIdle()
+
+        staleListener!!.onFailure(FakeWebSocket(), RuntimeException("expired"), unauthorizedResponse())
+        advanceUntilIdle()
+
+        assertEquals(listOf("secret_123", "secret_456"), client.reauthDeviceSecrets)
+        assertEquals("secret_789", viewModel.state.value.connection?.deviceSecret)
+    }
+
+    @Test
+    fun connectReplacesOlderStateConnectionWithFreshlyPairedConnection() = runTest(dispatcher) {
+        val client = FakeAgentMobileApi(
+            sessions = listOf(session("sess_1", "running", 5)),
+            pairResponses = listOf(
+                ConnectionInfo("127.0.0.1", 17365, "access_old", deviceId = "android-old", deviceSecret = "secret_old"),
+                ConnectionInfo("10.0.0.8", 18444, "access_new", deviceId = "android-new", deviceSecret = "secret_new")
+            )
+        )
+        val viewModel = ConsoleViewModel(client, dispatcher, reconnectDelayMs = 1)
+
+        viewModel.connect(pairingJson(host = "127.0.0.1", port = 17365))
+        advanceUntilIdle()
+        viewModel.connect(pairingJson(host = "10.0.0.8", port = 18444))
+        advanceUntilIdle()
+
+        assertEquals("10.0.0.8", viewModel.state.value.connection?.host)
+        assertEquals(18444, viewModel.state.value.connection?.port)
+        assertEquals("access_new", viewModel.state.value.connection?.accessToken)
+        assertEquals("secret_new", viewModel.state.value.connection?.deviceSecret)
+    }
+
+    @Test
+    fun connectResetsLastSeqWhenReconnectingToDifferentHost() = runTest(dispatcher) {
+        val client = FakeAgentMobileApi(
+            sessionsByPair = listOf(
+                listOf(session("sess_old", "running", 50)),
+                listOf(session("sess_new", "running", 5))
+            ),
+            pairResponses = listOf(
+                ConnectionInfo("127.0.0.1", 17365, "access_old", deviceId = "android-old", deviceSecret = "secret_old"),
+                ConnectionInfo("10.0.0.8", 18444, "access_new", deviceId = "android-new", deviceSecret = "secret_new")
+            )
+        )
+        val viewModel = ConsoleViewModel(client, dispatcher, reconnectDelayMs = 1)
+
+        viewModel.connect(pairingJson(host = "127.0.0.1", port = 17365))
+        advanceUntilIdle()
+        viewModel.connect(pairingJson(host = "10.0.0.8", port = 18444))
+        advanceUntilIdle()
+
+        assertEquals(5L, viewModel.state.value.lastSeq)
+        assertEquals(5L, client.lastSeqs.last())
     }
 
     @Test
@@ -321,15 +412,26 @@ class ConsoleViewModelTest {
         assertEquals(0, viewModel.state.value.approvals.size)
     }
 
-    private fun pairingJson(): String =
+    private fun pairingJson(
+        host: String = "127.0.0.1",
+        port: Int = 17365
+    ): String =
         """
         {
-          "host": "127.0.0.1",
-          "port": 17365,
+          "host": "$host",
+          "port": $port,
           "pairingToken": "pairing-token-123",
           "deviceName": "VS Code"
         }
         """.trimIndent()
+
+    private fun unauthorizedResponse(): Response =
+        Response.Builder()
+            .request(Request.Builder().url("http://127.0.0.1").build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(401)
+            .message("Unauthorized")
+            .build()
 
     private fun session(id: String, status: String, lastSeq: Long): SessionSummary =
         SessionSummary(
@@ -343,19 +445,45 @@ class ConsoleViewModelTest {
 }
 
 private class FakeAgentMobileApi(
-    private val sessions: List<SessionSummary>,
-    private val events: List<ConsoleLine> = emptyList()
+    private val sessions: List<SessionSummary> = emptyList(),
+    private val events: List<ConsoleLine> = emptyList(),
+    var failStatusOnceWith401: Boolean = false,
+    var failSendOnceWith401: Boolean = false,
+    var rotateCredentialsOnReauth: Boolean = false,
+    sessionsByPair: List<List<SessionSummary>> = emptyList(),
+    pairResponses: List<ConnectionInfo> = emptyList()
 ) : AgentMobileApi {
+    private val pairQueue = ArrayDeque(pairResponses)
+    private val sessionQueue = ArrayDeque(sessionsByPair)
     var sentText: String? = null
     var listener: WebSocketListener? = null
     var openStreamCalls = 0
     var createSessionCalls = 0
     var approvalDecision: String? = null
+    var reauthCalled = false
+    var reauthCount = 0
     val lastSeqs = mutableListOf<Long>()
     val listEventsLastSeqs = mutableListOf<Long>()
+    val statusAccessTokens = mutableListOf<String>()
+    val reauthDeviceSecrets = mutableListOf<String>()
 
     override fun pair(host: String, port: Int, pairingToken: String, deviceId: String): ConnectionInfo =
-        ConnectionInfo(host, port, "access_123")
+        pairQueue.removeFirstOrNull()
+            ?: ConnectionInfo(host, port, "access_123", deviceId = "android-001", deviceSecret = "secret_123")
+
+    override fun reauth(connection: ConnectionInfo): ConnectionInfo {
+        reauthCalled = true
+        reauthCount += 1
+        reauthDeviceSecrets += connection.deviceSecret.orEmpty()
+        return if (rotateCredentialsOnReauth) {
+            when (reauthCount) {
+                1 -> connection.copy(accessToken = "access_456", deviceSecret = "secret_456")
+                else -> connection.copy(accessToken = "access_789", deviceSecret = "secret_789")
+            }
+        } else {
+            connection.copy(accessToken = "access_456")
+        }
+    }
 
     override fun listSessions(connection: ConnectionInfo): List<SessionSummary> = sessions
 
@@ -365,10 +493,18 @@ private class FakeAgentMobileApi(
     }
 
     override fun getStatus(connection: ConnectionInfo): HostDashboardStatus =
-        HostDashboardStatus(
-            agents = listOf(AgentCapabilitySummary("codex", "Codex", "available", 1, "running")),
-            sessions = sessions
-        )
+        run {
+            statusAccessTokens += connection.accessToken
+            if (failStatusOnceWith401) {
+                failStatusOnceWith401 = false
+                throw UnauthorizedException("Get status failed: 401")
+            }
+            val currentSessions = sessionQueue.removeFirstOrNull() ?: sessions
+            HostDashboardStatus(
+                agents = listOf(AgentCapabilitySummary("codex", "Codex", "available", 1, "running")),
+                sessions = currentSessions
+            )
+        }
 
     override fun createSession(connection: ConnectionInfo): SessionSummary {
         createSessionCalls += 1
@@ -378,6 +514,10 @@ private class FakeAgentMobileApi(
     override fun attachSession(connection: ConnectionInfo, sessionId: String) = Unit
 
     override fun sendInput(connection: ConnectionInfo, sessionId: String, text: String) {
+        if (failSendOnceWith401) {
+            failSendOnceWith401 = false
+            throw UnauthorizedException("Send input failed: 401")
+        }
         sentText = text
     }
 
