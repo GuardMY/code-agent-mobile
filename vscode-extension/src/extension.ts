@@ -2,6 +2,7 @@ import * as qrcode from "qrcode";
 import * as vscode from "vscode";
 import type { HostDashboardStatus } from "@agent-mobile/protocol";
 import { readAgentMobileConfig } from "./config.js";
+import { DeviceRegistry, type TrustedDeviceRecord } from "./deviceRegistry.js";
 import { LocalHostSessionClient, type SessionConsoleEvent } from "./hostClient.js";
 import { fetchHostDashboardStatus, HostController, requestHostStop, type DashboardFetchResult } from "./hostController.js";
 import { createPairingPayload, createPairingToken, firstLanAddress } from "./pairing.js";
@@ -27,16 +28,19 @@ type HostClientTarget = {
 export function activate(context: vscode.ExtensionContext): void {
   const controller = new HostController();
   const state = createInitialState();
+  const deviceRegistry = new DeviceRegistry(context.secrets);
 
-  const provider = new PairingViewProvider(controller, state);
+  const provider = new PairingViewProvider(controller, state, deviceRegistry);
   context.subscriptions.push(vscode.window.registerWebviewViewProvider("agentMobile.pairingView", provider));
   context.subscriptions.push(
-    vscode.commands.registerCommand("agentMobile.startHost", () => startHost(controller, state, provider, context.extensionPath)),
+    vscode.commands.registerCommand("agentMobile.startHost", () =>
+      startHost(controller, state, provider, context.extensionPath, deviceRegistry)
+    ),
     vscode.commands.registerCommand("agentMobile.stopHost", () => stopHost(controller, state, provider)),
     vscode.commands.registerCommand("agentMobile.enableLanPairing", () => {
       state.lanEnabled = true;
       state.host = firstLanAddress() ?? "127.0.0.1";
-      return startHost(controller, state, provider, context.extensionPath);
+      return startHost(controller, state, provider, context.extensionPath, deviceRegistry);
     }),
     vscode.commands.registerCommand("agentMobile.disableLanPairing", () => disableLanPairing(controller, state, provider)),
     vscode.commands.registerCommand("agentMobile.copyPairingJson", () => vscode.env.clipboard.writeText(state.pairingJson))
@@ -105,8 +109,16 @@ export function reconcileCanonicalSessionEvent(
   state.sessionEvents = [...state.sessionEvents, event].slice(-500);
 }
 
-async function startHost(
-  controller: HostController,
+type DeviceRegistryLike = Pick<DeviceRegistry, "load" | "sync" | "remove">;
+
+export function createTrustedDeviceChangeHandler(deviceRegistry: DeviceRegistryLike) {
+  return async (devices: TrustedDeviceRecord[]): Promise<void> => {
+    await deviceRegistry.sync(devices);
+  };
+}
+
+export async function startHost(
+  controller: Pick<HostController, "start">,
   state: {
     lanEnabled: boolean;
     pairingToken: string;
@@ -118,11 +130,13 @@ async function startHost(
     consoleError?: string;
   },
   provider: PairingViewProvider,
-  extensionPath: string
+  extensionPath: string,
+  deviceRegistry: Pick<DeviceRegistry, "load">
 ): Promise<void> {
   const config = readAgentMobileConfig(vscode.workspace.getConfiguration("agentMobile"));
   state.port = config.port;
   const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+  const trustedDevices = await deviceRegistry.load();
   state.pairingToken = createPairingToken();
   state.pairingJson = JSON.stringify(
     createPairingPayload({
@@ -146,6 +160,7 @@ async function startHost(
     workspace,
     pairingToken: state.pairingToken,
     config,
+    trustedDevices,
     onOutput: (line) => console.log(`[agent-mobile-host] ${line}`)
   });
   if (result.mode === "reused") {
@@ -327,7 +342,8 @@ class PairingViewProvider implements vscode.WebviewViewProvider {
       selectedSessionId?: string;
       sessionEvents: SessionConsoleEvent[];
       consoleError?: string;
-    }
+    },
+    private readonly deviceRegistry: DeviceRegistryLike
   ) {}
 
   resetHostClient(input: { host: string; port: number; pairingToken: string }): void {
@@ -405,6 +421,7 @@ class PairingViewProvider implements vscode.WebviewViewProvider {
       port: this.state.port
     });
     if (dashboard.reachable) {
+      await this.deviceRegistry.sync(dashboard.status.trustedDevices);
       applyDashboardState(this.state, dashboard.status);
       clearMissingSessionSelection(this.state, dashboard.status.sessions);
       this.resetHostClient({
@@ -477,6 +494,7 @@ class PairingViewProvider implements vscode.WebviewViewProvider {
   private async revokeDevice(deviceId: string): Promise<void> {
     try {
       await this.requireHostClient().revokeDevice(deviceId);
+      await this.deviceRegistry.remove(deviceId);
       this.state.consoleError = undefined;
     } catch (error) {
       this.state.consoleError = error instanceof Error ? error.message : String(error);

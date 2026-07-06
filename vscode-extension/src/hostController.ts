@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { hostDashboardStatusSchema, type HostDashboardStatus } from "@agent-mobile/protocol";
 import type { AgentMobileConfig } from "./config.js";
 import { buildHostArgs } from "./config.js";
+import type { TrustedDeviceRecord } from "./deviceRegistry.js";
 
 export type HostControllerStatus = "stopped" | "starting" | "running";
 export type HostStartResult =
@@ -41,7 +42,11 @@ export async function fetchHostDashboardStatus(input: {
       return { reachable: false, error: `Host status returned ${response.status}` };
     }
     const json = await response.json();
-    return { reachable: true, status: hostDashboardStatusSchema.parse(json) };
+    const payload =
+      json && typeof json === "object"
+        ? { ...json, trustedDevices: (json as { trustedDevices?: unknown }).trustedDevices ?? [] }
+        : json;
+    return { reachable: true, status: hostDashboardStatusSchema.parse(payload) };
   } catch (error) {
     return { reachable: false, error: error instanceof Error ? error.message : String(error) };
   }
@@ -104,6 +109,7 @@ export class HostController {
     workspace: string;
     pairingToken: string;
     config: AgentMobileConfig;
+    trustedDevices?: TrustedDeviceRecord[];
     onOutput: (line: string) => void;
   }): Promise<HostStartResult> {
     this.startQueue = this.startQueue.then(() => this.startNow(input), () => this.startNow(input));
@@ -121,6 +127,7 @@ export class HostController {
     workspace: string;
     pairingToken: string;
     config: AgentMobileConfig;
+    trustedDevices?: TrustedDeviceRecord[];
     onOutput: (line: string) => void;
   }): Promise<HostStartResult> {
     const existing = await this.dependencies.fetchHostDashboardStatus({
@@ -162,6 +169,9 @@ export class HostController {
       );
     }
     const args = [cliPath, ...buildHostArgs(input)];
+    if (input.trustedDevices && input.trustedDevices.length > 0) {
+      args.push("--trusted-devices", JSON.stringify(input.trustedDevices));
+    }
     const child = this.dependencies.spawn(process.execPath, args, {
       stdio: ["ignore", "pipe", "pipe"],
       env: process.env

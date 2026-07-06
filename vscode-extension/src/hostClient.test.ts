@@ -10,7 +10,11 @@ describe("LocalHostSessionClient", () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       const href = String(url);
       if (href.endsWith("/pair")) {
-        return jsonResponse({ accessToken: "access_vscode", expiresAt: "2026-07-03T12:00:00.000Z" });
+        return jsonResponse({
+          accessToken: "access_vscode",
+          deviceId: "vscode-extension",
+          deviceSecret: "secret_vscode"
+        });
       }
       if (href.endsWith("/sessions/codex_thr_desktop/attach")) {
         expect(init?.headers).toMatchObject({ authorization: "Bearer access_vscode" });

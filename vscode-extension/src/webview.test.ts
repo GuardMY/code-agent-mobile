@@ -9,6 +9,9 @@ import {
 
 function dashboard(input: {
   devices?: Parameters<typeof renderPairingHtml>[0]["dashboard"] extends { reachable: true; status: infer T } ? T["devices"] : never;
+  trustedDevices?: Parameters<typeof renderPairingHtml>[0]["dashboard"] extends { reachable: true; status: infer T }
+    ? T["trustedDevices"]
+    : never;
   agents?: Parameters<typeof renderPairingHtml>[0]["dashboard"] extends { reachable: true; status: infer T } ? T["agents"] : never;
   sessions?: Parameters<typeof renderPairingHtml>[0]["dashboard"] extends { reachable: true; status: infer T } ? T["sessions"] : never;
 }) {
@@ -33,6 +36,7 @@ function dashboard(input: {
         }
       },
       devices: input.devices ?? [],
+      trustedDevices: input.trustedDevices ?? [],
       agents: input.agents ?? [],
       sessions: input.sessions ?? []
     }
@@ -154,6 +158,21 @@ describe("webview html", () => {
     expect(html).toContain("长期有效");
     expect(html).not.toContain("令牌过期");
     expect(html).not.toContain("accessTokenExpiresAt");
+  });
+
+  it("keeps remembered mobile devices visible in the dashboard after restart", async () => {
+    const html = await renderPairingHtml({
+      status: "running",
+      lanEnabled: true,
+      pairingJson: "{}",
+      qrSvg: "<svg></svg>",
+      dashboard: dashboard({
+        devices: [{ deviceId: "android-remembered", clientType: "android-app", pairedAt: "2026-07-06T10:00:00.000Z" }]
+      })
+    });
+
+    expect(html).toContain("android-remembered");
+    expect(html).toContain("Android 应用");
   });
 
   it.skip("does not render the VS Code extension client in the mobile device panel", async () => {

@@ -3,11 +3,13 @@ import type { HostDashboardStatus } from "@agent-mobile/protocol";
 import {
   applyDashboardState,
   appendLocalUserInput,
+  createTrustedDeviceChangeHandler,
   clearMissingSessionSelection,
   clearStoppedSessionSelection,
   createInitialState,
   isSameHostClientTarget,
   reconcileCanonicalSessionEvent,
+  startHost,
   selectDashboardForRender
 } from "./extension.js";
 
@@ -31,6 +33,7 @@ function buildDashboard(): HostDashboardStatus {
       }
     },
     devices: [],
+    trustedDevices: [],
     agents: [],
     sessions: []
   };
@@ -50,7 +53,9 @@ vi.mock("vscode", () => ({
     registerWebviewViewProvider: vi.fn()
   },
   workspace: {
-    getConfiguration: vi.fn(),
+    getConfiguration: vi.fn(() => ({
+      get: <T>(_key: string, fallback: T) => fallback
+    })),
     workspaceFolders: []
   }
 }));
@@ -193,5 +198,66 @@ describe("extension shared host state", () => {
         { host: "127.0.0.1", port: 17365, pairingToken: "pairing-token-456" }
       )
     ).toBe(false);
+  });
+
+  it("loads trusted devices from the registry and passes them into host startup", async () => {
+    const state = createInitialState();
+    const trustedDevices = [
+      {
+        deviceId: "android-remembered",
+        clientType: "android-app" as const,
+        pairedAt: "2026-07-06T10:00:00.000Z",
+        deviceSecretHash: "hash_abc"
+      }
+    ];
+    const controller = {
+      start: vi.fn(async () => ({ mode: "spawned" as const }))
+    };
+    const provider = {
+      resetHostClient: vi.fn(),
+      safeRefresh: vi.fn(async () => undefined)
+    };
+    const registry = {
+      load: vi.fn(async () => trustedDevices)
+    };
+
+    await startHost(controller as never, state, provider as never, "E:/extensions/agent-mobile-control", registry as never);
+
+    expect(registry.load).toHaveBeenCalledOnce();
+    expect(controller.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trustedDevices
+      })
+    );
+  });
+
+  it("syncs trusted devices into persistent storage when the runtime registry changes", async () => {
+    const registry = {
+      load: vi.fn(async () => []),
+      sync: vi.fn(async () => undefined),
+      remove: vi.fn(async () => undefined)
+    };
+    const handleTrustedDevicesChanged = createTrustedDeviceChangeHandler(registry as never);
+
+    const trustedDevices = [
+      {
+        deviceId: "android-remembered",
+        clientType: "android-app",
+        pairedAt: "2026-07-06T10:00:00.000Z",
+        deviceSecretHash: "hash_abc"
+      },
+      {
+        deviceId: "android-revoked",
+        clientType: "android-app",
+        pairedAt: "2026-07-06T09:00:00.000Z",
+        deviceSecretHash: "hash_old",
+        revokedAt: "2026-07-06T11:00:00.000Z"
+      }
+    ];
+
+    await handleTrustedDevicesChanged(trustedDevices);
+
+    expect(registry.sync).toHaveBeenCalledWith(trustedDevices);
+    expect(registry.remove).not.toHaveBeenCalled();
   });
 });

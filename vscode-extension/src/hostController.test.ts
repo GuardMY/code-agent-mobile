@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
+import type { TrustedDeviceRecord } from "./deviceRegistry.js";
 import {
   buildHostStatusUrl,
   fetchHostDashboardStatus,
@@ -17,6 +18,16 @@ class FakeChild extends EventEmitter {
     this.killed = true;
     return true;
   }
+}
+
+function createTrustedDevice(overrides: Partial<TrustedDeviceRecord> = {}): TrustedDeviceRecord {
+  return {
+    deviceId: "android-001",
+    clientType: "android-app",
+    pairedAt: "2026-07-06T10:00:00.000Z",
+    deviceSecretHash: "hash_abc",
+    ...overrides
+  };
 }
 
 describe("host controller", () => {
@@ -75,6 +86,7 @@ describe("host controller", () => {
               }
             },
             devices: [],
+            trustedDevices: [],
             agents: [],
             sessions: []
           }),
@@ -84,6 +96,46 @@ describe("host controller", () => {
     });
 
     expect(headers).toMatchObject({ "x-agent-mobile-pairing-token": "pairing-token-123" });
+  });
+
+  it("accepts older host dashboard payloads that omit trustedDevices", async () => {
+    const result = await fetchHostDashboardStatus({
+      host: "127.0.0.1",
+      port: 17365,
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            server: {
+              running: true,
+              lanEnabled: false,
+              host: "127.0.0.1",
+              port: 17365,
+              deviceName: "VS Code",
+              version: "0.1.0"
+            },
+            pairing: {
+              enabled: true,
+              pairingPayload: {
+                host: "127.0.0.1",
+                port: 17365,
+                pairingToken: "pairing-token-123",
+                deviceName: "VS Code"
+              }
+            },
+            devices: [],
+            agents: [],
+            sessions: []
+          }),
+          { status: 200 }
+        )
+    });
+
+    expect(result).toMatchObject({
+      reachable: true,
+      status: {
+        trustedDevices: []
+      }
+    });
   });
 
   it("stays starting until the spawned host reports ready", async () => {
@@ -138,6 +190,7 @@ describe("host controller", () => {
             }
           },
           devices: [],
+          trustedDevices: [],
           agents: [],
           sessions: []
         }
@@ -194,6 +247,7 @@ describe("host controller", () => {
               }
             },
             devices: [],
+            trustedDevices: [],
             agents: [],
             sessions: []
           }
@@ -351,6 +405,34 @@ describe("host controller", () => {
     expect(spawn).toHaveBeenCalledWith(
       process.execPath,
       expect.arrayContaining([resolveBundledHostCliPath("E:/extensions/agent-mobile-control")]),
+      expect.any(Object)
+    );
+  });
+
+  it("passes trusted devices to host startup through the CLI arguments", async () => {
+    const child = new FakeChild();
+    const spawn = vi.fn(() => child as never);
+    const controller = new HostController({
+      existsSync: () => true,
+      spawn,
+      fetchHostDashboardStatus: async () => ({ reachable: false, error: "offline" }),
+      requestHostStop: async () => undefined
+    });
+    const trustedDevices = [createTrustedDevice({ deviceId: "android-remembered" })];
+
+    await controller.start({
+      host: "127.0.0.1",
+      extensionPath: "E:/extensions/agent-mobile-control",
+      workspace: "E:/repo",
+      pairingToken: "pairing-token-123",
+      config: { port: 17365, codexCommand: "codex", eventCacheSize: 500 },
+      trustedDevices,
+      onOutput: () => undefined
+    });
+
+    expect(spawn).toHaveBeenCalledWith(
+      process.execPath,
+      expect.arrayContaining(["--trusted-devices", JSON.stringify(trustedDevices)]),
       expect.any(Object)
     );
   });

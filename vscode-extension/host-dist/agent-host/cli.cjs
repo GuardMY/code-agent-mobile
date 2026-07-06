@@ -28,6 +28,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
   mod
 ));
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
 // ../node_modules/fastify-plugin/lib/getPluginName.js
 var require_getPluginName = __commonJS({
@@ -2367,7 +2368,7 @@ var require_websocket = __commonJS({
     var http = require("http");
     var net = require("net");
     var tls = require("tls");
-    var { randomBytes: randomBytes2, createHash } = require("crypto");
+    var { randomBytes: randomBytes3, createHash: createHash2 } = require("crypto");
     var { Duplex, Readable } = require("stream");
     var { URL: URL2 } = require("url");
     var PerMessageDeflate = require_permessage_deflate();
@@ -2905,7 +2906,7 @@ var require_websocket = __commonJS({
         }
       }
       const defaultPort = isSecure ? 443 : 80;
-      const key = randomBytes2(16).toString("base64");
+      const key = randomBytes3(16).toString("base64");
       const request = isSecure ? https.request : http.request;
       const protocolSet = /* @__PURE__ */ new Set();
       let perMessageDeflate;
@@ -3035,7 +3036,7 @@ var require_websocket = __commonJS({
           abortHandshake(websocket2, socket, "Invalid Upgrade header");
           return;
         }
-        const digest = createHash("sha1").update(key + GUID).digest("base64");
+        const digest = createHash2("sha1").update(key + GUID).digest("base64");
         if (res.headers["sec-websocket-accept"] !== digest) {
           abortHandshake(websocket2, socket, "Invalid Sec-WebSocket-Accept header");
           return;
@@ -3404,7 +3405,7 @@ var require_websocket_server = __commonJS({
     var EventEmitter = require("events");
     var http = require("http");
     var { Duplex } = require("stream");
-    var { createHash } = require("crypto");
+    var { createHash: createHash2 } = require("crypto");
     var extension = require_extension();
     var PerMessageDeflate = require_permessage_deflate();
     var subprotocol = require_subprotocol();
@@ -3711,7 +3712,7 @@ var require_websocket_server = __commonJS({
           );
         }
         if (this._state > RUNNING) return abortHandshake(socket, 503);
-        const digest = createHash("sha1").update(key + GUID).digest("base64");
+        const digest = createHash2("sha1").update(key + GUID).digest("base64");
         const headers = [
           "HTTP/1.1 101 Switching Protocols",
           "Upgrade: websocket",
@@ -6929,7 +6930,7 @@ var require_websocket2 = __commonJS({
     "use strict";
     var { ServerResponse } = require("node:http");
     var { PassThrough } = require("node:stream");
-    var { randomBytes: randomBytes2 } = require("node:crypto");
+    var { randomBytes: randomBytes3 } = require("node:crypto");
     var fp = require_plugin();
     var WebSocket2 = require_ws();
     var Duplexify = require_duplexify();
@@ -7000,7 +7001,7 @@ var require_websocket2 = __commonJS({
             connection: "upgrade",
             upgrade: "websocket",
             "sec-websocket-version": 13,
-            "sec-websocket-key": randomBytes2(16).toString("base64")
+            "sec-websocket-key": randomBytes3(16).toString("base64")
           },
           httpVersion: "1.1",
           url: path,
@@ -13018,7 +13019,7 @@ var require_transport = __commonJS({
     var { existsSync } = require("node:fs");
     var getCallers = require_caller();
     var { join, isAbsolute, sep } = require("node:path");
-    var { fileURLToPath } = require("node:url");
+    var { fileURLToPath: fileURLToPath2 } = require("node:url");
     var sleep = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
     var ThreadStream = require_thread_stream();
@@ -13084,7 +13085,7 @@ var require_transport = __commonJS({
       let path = unquoted;
       if (path.startsWith("file://")) {
         try {
-          path = fileURLToPath(path);
+          path = fileURLToPath2(path);
         } catch {
           return false;
         }
@@ -41730,469 +41731,14 @@ ${body}`);
 });
 
 // ../agent-host/src/cli.ts
-var import_node_crypto2 = require("node:crypto");
+var cli_exports = {};
+__export(cli_exports, {
+  parseTrustedDevicesArgument: () => parseTrustedDevicesArgument
+});
+module.exports = __toCommonJS(cli_exports);
+var import_node_url = require("node:url");
+var import_node_crypto3 = require("node:crypto");
 var import_node_os = require("node:os");
-
-// ../agent-host/src/adapters/codexAdapter.ts
-var import_node_child_process = require("node:child_process");
-
-// ../agent-host/src/codex/appServerClient.ts
-var import_node_readline = require("node:readline");
-var AppServerCodexProcess = class {
-  constructor(client, child, exited) {
-    this.client = client;
-    this.child = child;
-    this.exited = exited;
-  }
-  sendInput(input) {
-    return this.client.sendInput(input);
-  }
-  async stop() {
-    try {
-      await this.client.interrupt();
-    } catch {
-    }
-    this.child.kill();
-    return this.exited;
-  }
-};
-var AppServerClient = class {
-  constructor(child, options) {
-    this.child = child;
-    this.options = options;
-    const stdout = (0, import_node_readline.createInterface)({ input: child.stdout });
-    stdout.on("line", (line) => this.handleStdoutLine(line));
-    const stderr = (0, import_node_readline.createInterface)({ input: child.stderr });
-    stderr.on("line", (line) => {
-      if (line.trim()) {
-        this.options.onOutput("stderr", `${line}
-`);
-      }
-    });
-    child.on("exit", (exitCode) => {
-      this.rejectPending(new Error("app-server exited"));
-      this.options.onExit(exitCode ?? 0);
-    });
-    child.on("error", (error) => {
-      this.rejectPending(error instanceof Error ? error : new Error(String(error)));
-      this.options.onExit(1);
-    });
-  }
-  nextId = 0;
-  pending = /* @__PURE__ */ new Map();
-  threadId;
-  turnId;
-  turnInFlight = false;
-  streamedAgentMessageText = "";
-  async initialize() {
-    await this.request("initialize", {
-      clientInfo: this.options.clientInfo,
-      capabilities: { experimentalApi: true }
-    });
-    this.notify("initialized", {});
-  }
-  async startThread() {
-    const result = await this.request("thread/start", {
-      cwd: this.options.cwd
-    });
-    const threadId = readId(result, "thread");
-    if (!threadId) {
-      throw new Error("app-server did not return a thread id");
-    }
-    this.threadId = threadId;
-    return threadId;
-  }
-  async listThreads() {
-    const result = await this.request("thread/list", {});
-    return readThreads(result);
-  }
-  async resumeThread(threadId) {
-    const result = await this.request("thread/resume", { threadId });
-    const resumedThreadId = readId(result, "thread") ?? threadId;
-    this.threadId = resumedThreadId;
-    for (const text of readAgentTexts(result)) {
-      this.options.onOutput("stdout", text);
-    }
-    return resumedThreadId;
-  }
-  async sendInput(text) {
-    if (!this.threadId) {
-      throw new Error("app-server thread has not been started");
-    }
-    if (this.turnInFlight && this.turnId) {
-      await this.request("turn/steer", {
-        threadId: this.threadId,
-        expectedTurnId: this.turnId,
-        input: [{ type: "text", text }]
-      });
-      return;
-    }
-    const result = await this.request("turn/start", {
-      threadId: this.threadId,
-      input: [{ type: "text", text }]
-    });
-    const turnId = readId(result, "turn");
-    if (turnId) {
-      this.turnId = turnId;
-    }
-    this.turnInFlight = true;
-  }
-  async interrupt() {
-    if (!this.threadId || !this.turnId || !this.turnInFlight) {
-      return;
-    }
-    await this.request("turn/interrupt", {
-      threadId: this.threadId,
-      turnId: this.turnId
-    });
-    this.turnInFlight = false;
-  }
-  handleStdoutLine(line) {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      return;
-    }
-    try {
-      const message = JSON.parse(trimmed);
-      if (typeof message.id === "number") {
-        this.handleResponse(message);
-        return;
-      }
-      if (typeof message.method === "string") {
-        this.handleNotification(message.method, message.params);
-        return;
-      }
-    } catch {
-      this.options.onOutput("stderr", `${line}
-`);
-      return;
-    }
-    this.options.onOutput("stderr", `${line}
-`);
-  }
-  handleResponse(message) {
-    const id = message.id;
-    if (typeof id !== "number") {
-      return;
-    }
-    const pending = this.pending.get(id);
-    if (!pending) {
-      return;
-    }
-    this.pending.delete(id);
-    if ("error" in message && message.error && typeof message.error === "object") {
-      const error = message.error;
-      pending.reject(new Error(typeof error.message === "string" ? error.message : "app-server request failed"));
-      return;
-    }
-    pending.resolve(message.result);
-  }
-  handleNotification(method, params) {
-    if (method === "turn/started") {
-      const turnId = readNestedId(params, "turn");
-      if (turnId) {
-        this.turnId = turnId;
-        this.turnInFlight = true;
-      }
-      this.streamedAgentMessageText = "";
-      return;
-    }
-    if (method === "turn/completed") {
-      this.turnInFlight = false;
-      this.turnId = void 0;
-      this.streamedAgentMessageText = "";
-      return;
-    }
-    if (method === "item/agentMessage/delta") {
-      const text = readText(params);
-      if (text) {
-        this.streamedAgentMessageText += text;
-        this.options.onOutput("stdout", text);
-      }
-      return;
-    }
-    if (method === "item/completed") {
-      const text = readCompletedAgentMessageText(params);
-      if (text) {
-        const remainingText = text.startsWith(this.streamedAgentMessageText) ? text.slice(this.streamedAgentMessageText.length) : text === this.streamedAgentMessageText ? "" : text;
-        if (remainingText) {
-          this.options.onOutput("stdout", remainingText);
-        }
-      }
-      this.streamedAgentMessageText = "";
-    }
-  }
-  request(method, params) {
-    const id = this.nextId++;
-    const message = { id, method, params };
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.child.stdin.write(`${JSON.stringify(message)}
-`);
-    });
-  }
-  notify(method, params) {
-    this.child.stdin.write(`${JSON.stringify({ method, params })}
-`);
-  }
-  rejectPending(error) {
-    for (const pending of this.pending.values()) {
-      pending.reject(error);
-    }
-    this.pending.clear();
-  }
-};
-function createAppServerCodexProcess(input) {
-  const client = new AppServerClient(input.child, input.options);
-  return (async () => {
-    await client.initialize();
-    await client.startThread();
-    const exited = new Promise((resolve) => {
-      input.child.on("exit", (exitCode) => resolve(exitCode ?? 0));
-    });
-    return new AppServerCodexProcess(client, input.child, exited);
-  })();
-}
-function createAttachedAppServerCodexProcess(input) {
-  const client = new AppServerClient(input.child, input.options);
-  return (async () => {
-    await client.initialize();
-    await client.resumeThread(input.threadId);
-    const exited = new Promise((resolve) => {
-      input.child.on("exit", (exitCode) => resolve(exitCode ?? 0));
-    });
-    return new AppServerCodexProcess(client, input.child, exited);
-  })();
-}
-function readId(value, key) {
-  if (!value || typeof value !== "object") {
-    return void 0;
-  }
-  const nested = value[key];
-  if (!nested || typeof nested !== "object") {
-    return void 0;
-  }
-  const id = nested.id;
-  return typeof id === "string" ? id : void 0;
-}
-function readNestedId(value, key) {
-  return readId(value, key);
-}
-function readThreads(value) {
-  if (!value || typeof value !== "object") {
-    return [];
-  }
-  const record = value;
-  const threads = Array.isArray(record.threads) ? record.threads : record.data;
-  if (!Array.isArray(threads)) {
-    return [];
-  }
-  return threads.flatMap((thread) => {
-    if (!thread || typeof thread !== "object") {
-      return [];
-    }
-    const record2 = thread;
-    if (typeof record2.id !== "string") {
-      return [];
-    }
-    return [
-      {
-        id: record2.id,
-        cwd: typeof record2.cwd === "string" ? record2.cwd : void 0,
-        title: readOptionalString(record2.title) ?? readOptionalString(record2.name) ?? readOptionalString(record2.preview),
-        updatedAt: readOptionalDateTime(record2.updatedAt)
-      }
-    ];
-  });
-}
-function readOptionalString(value) {
-  if (typeof value === "string") {
-    return value;
-  }
-  return void 0;
-}
-function readOptionalDateTime(value) {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return new Date(value * 1e3).toISOString();
-  }
-  return void 0;
-}
-function readText(value) {
-  if (!value) {
-    return void 0;
-  }
-  if (typeof value === "string") {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const text = readText(item);
-      if (text) {
-        return text;
-      }
-    }
-    return void 0;
-  }
-  if (typeof value !== "object") {
-    return void 0;
-  }
-  const record = value;
-  if (typeof record.text === "string") {
-    return record.text;
-  }
-  if (typeof record.delta === "string") {
-    return record.delta;
-  }
-  if (record.delta) {
-    const deltaText = readText(record.delta);
-    if (deltaText) {
-      return deltaText;
-    }
-  }
-  if (record.content) {
-    const contentText = readText(record.content);
-    if (contentText) {
-      return contentText;
-    }
-  }
-  if (record.message) {
-    const messageText = readText(record.message);
-    if (messageText) {
-      return messageText;
-    }
-  }
-  if (record.item) {
-    const itemText = readText(record.item);
-    if (itemText) {
-      return itemText;
-    }
-  }
-  return void 0;
-}
-function readAgentTexts(value) {
-  if (!value) {
-    return [];
-  }
-  if (typeof value === "string") {
-    return [];
-  }
-  if (Array.isArray(value)) {
-    return value.flatMap((item) => readAgentTexts(item));
-  }
-  if (typeof value !== "object") {
-    return [];
-  }
-  const record = value;
-  if (record.type === "userMessage") {
-    return [];
-  }
-  const ownText = typeof record.text === "string" ? [record.text] : [];
-  return [
-    ...ownText,
-    ...readAgentTexts(record.delta),
-    ...readAgentTexts(record.content),
-    ...readAgentTexts(record.message),
-    ...readAgentTexts(record.item),
-    ...readAgentTexts(record.items),
-    ...readAgentTexts(record.turns),
-    ...readAgentTexts(record.thread)
-  ];
-}
-function readCompletedAgentMessageText(value) {
-  if (!value || typeof value !== "object") {
-    return void 0;
-  }
-  const item = value.item;
-  if (!item || typeof item !== "object") {
-    return readText(value);
-  }
-  const record = item;
-  if (record.type === "userMessage") {
-    return void 0;
-  }
-  return readText(item);
-}
-
-// ../agent-host/src/adapters/codexAdapter.ts
-var CodexAdapter = class {
-  constructor(options) {
-    this.options = options;
-  }
-  id = "codex";
-  displayName = "Codex";
-  async start(options) {
-    const child = this.spawnAppServer(options.workspace);
-    return createAppServerCodexProcess({
-      child,
-      options: {
-        clientInfo: {
-          name: "agent_mobile_vscode",
-          title: "Agent Mobile VS Code",
-          version: "0.1.0"
-        },
-        cwd: options.workspace,
-        onOutput: options.onOutput,
-        onExit: options.onExit
-      }
-    });
-  }
-  async discoverSessions(options) {
-    const child = this.spawnAppServer(options.workspace);
-    const client = new AppServerClient(child, {
-      clientInfo: {
-        name: "agent_mobile_vscode",
-        title: "Agent Mobile VS Code",
-        version: "0.1.0"
-      },
-      cwd: options.workspace,
-      onOutput: () => void 0,
-      onExit: () => void 0
-    });
-    try {
-      await client.initialize();
-      const threads = await client.listThreads();
-      return threads.map((thread) => ({
-        id: thread.id,
-        workspace: thread.cwd ?? options.workspace,
-        title: thread.title,
-        updatedAt: thread.updatedAt
-      }));
-    } finally {
-      child.kill();
-    }
-  }
-  async attachSession(options) {
-    const child = this.spawnAppServer(options.workspace);
-    return createAttachedAppServerCodexProcess({
-      child,
-      threadId: options.externalId,
-      options: {
-        clientInfo: {
-          name: "agent_mobile_vscode",
-          title: "Agent Mobile VS Code",
-          version: "0.1.0"
-        },
-        cwd: options.workspace,
-        onOutput: options.onOutput,
-        onExit: options.onExit
-      }
-    });
-  }
-  spawnAppServer(workspace) {
-    return (0, import_node_child_process.spawn)(this.options.command, ["app-server", "--listen", "stdio://"], {
-      cwd: workspace,
-      shell: process.platform === "win32",
-      stdio: ["pipe", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        RUST_LOG: process.env.RUST_LOG ?? "error"
-      }
-    });
-  }
-};
 
 // ../node_modules/zod/v3/external.js
 var external_exports = {};
@@ -46272,6 +45818,11 @@ var pairingPayloadSchema = external_exports.object({
   pairingToken: external_exports.string().min(8),
   deviceName: external_exports.string().min(1)
 });
+var pairSuccessResponseSchema = external_exports.object({
+  accessToken: external_exports.string().min(1),
+  deviceId: external_exports.string().min(1),
+  deviceSecret: external_exports.string().min(1).optional()
+});
 var clientTypeSchema = external_exports.enum(["android-app", "ios-app", "wechat-mini-program", "desktop-extension", "unknown"]);
 var sessionStatusSchema = external_exports.enum(["starting", "running", "stopped", "exited", "failed"]);
 var sessionSummarySchema = external_exports.object({
@@ -46288,6 +45839,22 @@ var deviceSummarySchema = external_exports.object({
   clientType: clientTypeSchema,
   pairedAt: external_exports.string().datetime(),
   revokedAt: external_exports.string().datetime().optional()
+});
+var trustedDeviceRecordSchema = external_exports.object({
+  deviceId: external_exports.string().min(1),
+  clientType: clientTypeSchema,
+  displayName: external_exports.string().min(1).optional(),
+  pairedAt: external_exports.string().datetime(),
+  revokedAt: external_exports.string().datetime().optional(),
+  deviceSecretHash: external_exports.string().min(1),
+  lastSeenAt: external_exports.string().datetime().optional()
+});
+var reauthRequestSchema = external_exports.object({
+  deviceId: external_exports.string().min(1),
+  deviceSecret: external_exports.string().min(1)
+});
+var reauthResponseSchema = external_exports.object({
+  accessToken: external_exports.string().min(1)
 });
 var agentAvailabilitySchema = external_exports.enum(["available", "missing", "unknown"]);
 var agentCapabilitySummarySchema = external_exports.object({
@@ -46311,6 +45878,7 @@ var hostDashboardStatusSchema = external_exports.object({
     pairingPayload: pairingPayloadSchema
   }),
   devices: external_exports.array(deviceSummarySchema),
+  trustedDevices: external_exports.array(trustedDeviceRecordSchema).default([]),
   agents: external_exports.array(agentCapabilitySummarySchema),
   sessions: external_exports.array(sessionSummarySchema)
 });
@@ -46390,6 +45958,467 @@ function createEnvelope(input) {
   };
 }
 
+// ../agent-host/src/adapters/codexAdapter.ts
+var import_node_child_process = require("node:child_process");
+
+// ../agent-host/src/codex/appServerClient.ts
+var import_node_readline = require("node:readline");
+var AppServerCodexProcess = class {
+  constructor(client, child, exited) {
+    this.client = client;
+    this.child = child;
+    this.exited = exited;
+  }
+  sendInput(input) {
+    return this.client.sendInput(input);
+  }
+  async stop() {
+    try {
+      await this.client.interrupt();
+    } catch {
+    }
+    this.child.kill();
+    return this.exited;
+  }
+};
+var AppServerClient = class {
+  constructor(child, options) {
+    this.child = child;
+    this.options = options;
+    const stdout = (0, import_node_readline.createInterface)({ input: child.stdout });
+    stdout.on("line", (line) => this.handleStdoutLine(line));
+    const stderr = (0, import_node_readline.createInterface)({ input: child.stderr });
+    stderr.on("line", (line) => {
+      if (line.trim()) {
+        this.options.onOutput("stderr", `${line}
+`);
+      }
+    });
+    child.on("exit", (exitCode) => {
+      this.rejectPending(new Error("app-server exited"));
+      this.options.onExit(exitCode ?? 0);
+    });
+    child.on("error", (error) => {
+      this.rejectPending(error instanceof Error ? error : new Error(String(error)));
+      this.options.onExit(1);
+    });
+  }
+  nextId = 0;
+  pending = /* @__PURE__ */ new Map();
+  threadId;
+  turnId;
+  turnInFlight = false;
+  streamedAgentMessageText = "";
+  async initialize() {
+    await this.request("initialize", {
+      clientInfo: this.options.clientInfo,
+      capabilities: { experimentalApi: true }
+    });
+    this.notify("initialized", {});
+  }
+  async startThread() {
+    const result = await this.request("thread/start", {
+      cwd: this.options.cwd
+    });
+    const threadId = readId(result, "thread");
+    if (!threadId) {
+      throw new Error("app-server did not return a thread id");
+    }
+    this.threadId = threadId;
+    return threadId;
+  }
+  async listThreads() {
+    const result = await this.request("thread/list", {});
+    return readThreads(result);
+  }
+  async resumeThread(threadId) {
+    const result = await this.request("thread/resume", { threadId });
+    const resumedThreadId = readId(result, "thread") ?? threadId;
+    this.threadId = resumedThreadId;
+    for (const text of readAgentTexts(result)) {
+      this.options.onOutput("stdout", text);
+    }
+    return resumedThreadId;
+  }
+  async sendInput(text) {
+    if (!this.threadId) {
+      throw new Error("app-server thread has not been started");
+    }
+    if (this.turnInFlight && this.turnId) {
+      await this.request("turn/steer", {
+        threadId: this.threadId,
+        expectedTurnId: this.turnId,
+        input: [{ type: "text", text }]
+      });
+      return;
+    }
+    const result = await this.request("turn/start", {
+      threadId: this.threadId,
+      input: [{ type: "text", text }]
+    });
+    const turnId = readId(result, "turn");
+    if (turnId) {
+      this.turnId = turnId;
+    }
+    this.turnInFlight = true;
+  }
+  async interrupt() {
+    if (!this.threadId || !this.turnId || !this.turnInFlight) {
+      return;
+    }
+    await this.request("turn/interrupt", {
+      threadId: this.threadId,
+      turnId: this.turnId
+    });
+    this.turnInFlight = false;
+  }
+  handleStdoutLine(line) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
+    }
+    try {
+      const message = JSON.parse(trimmed);
+      if (typeof message.id === "number") {
+        this.handleResponse(message);
+        return;
+      }
+      if (typeof message.method === "string") {
+        this.handleNotification(message.method, message.params);
+        return;
+      }
+    } catch {
+      this.options.onOutput("stderr", `${line}
+`);
+      return;
+    }
+    this.options.onOutput("stderr", `${line}
+`);
+  }
+  handleResponse(message) {
+    const id = message.id;
+    if (typeof id !== "number") {
+      return;
+    }
+    const pending = this.pending.get(id);
+    if (!pending) {
+      return;
+    }
+    this.pending.delete(id);
+    if ("error" in message && message.error && typeof message.error === "object") {
+      const error = message.error;
+      pending.reject(new Error(typeof error.message === "string" ? error.message : "app-server request failed"));
+      return;
+    }
+    pending.resolve(message.result);
+  }
+  handleNotification(method, params) {
+    if (method === "turn/started") {
+      const turnId = readNestedId(params, "turn");
+      if (turnId) {
+        this.turnId = turnId;
+        this.turnInFlight = true;
+      }
+      this.streamedAgentMessageText = "";
+      return;
+    }
+    if (method === "turn/completed") {
+      this.turnInFlight = false;
+      this.turnId = void 0;
+      this.streamedAgentMessageText = "";
+      return;
+    }
+    if (method === "item/agentMessage/delta") {
+      const text = readText(params);
+      if (text) {
+        this.streamedAgentMessageText += text;
+        this.options.onOutput("stdout", text);
+      }
+      return;
+    }
+    if (method === "item/completed") {
+      const text = readCompletedAgentMessageText(params);
+      if (text) {
+        const remainingText = text.startsWith(this.streamedAgentMessageText) ? text.slice(this.streamedAgentMessageText.length) : text === this.streamedAgentMessageText ? "" : text;
+        if (remainingText) {
+          this.options.onOutput("stdout", remainingText);
+        }
+      }
+      this.streamedAgentMessageText = "";
+    }
+  }
+  request(method, params) {
+    const id = this.nextId++;
+    const message = { id, method, params };
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      this.child.stdin.write(`${JSON.stringify(message)}
+`);
+    });
+  }
+  notify(method, params) {
+    this.child.stdin.write(`${JSON.stringify({ method, params })}
+`);
+  }
+  rejectPending(error) {
+    for (const pending of this.pending.values()) {
+      pending.reject(error);
+    }
+    this.pending.clear();
+  }
+};
+function createAppServerCodexProcess(input) {
+  const client = new AppServerClient(input.child, input.options);
+  return (async () => {
+    await client.initialize();
+    await client.startThread();
+    const exited = new Promise((resolve) => {
+      input.child.on("exit", (exitCode) => resolve(exitCode ?? 0));
+    });
+    return new AppServerCodexProcess(client, input.child, exited);
+  })();
+}
+function createAttachedAppServerCodexProcess(input) {
+  const client = new AppServerClient(input.child, input.options);
+  return (async () => {
+    await client.initialize();
+    await client.resumeThread(input.threadId);
+    const exited = new Promise((resolve) => {
+      input.child.on("exit", (exitCode) => resolve(exitCode ?? 0));
+    });
+    return new AppServerCodexProcess(client, input.child, exited);
+  })();
+}
+function readId(value, key) {
+  if (!value || typeof value !== "object") {
+    return void 0;
+  }
+  const nested = value[key];
+  if (!nested || typeof nested !== "object") {
+    return void 0;
+  }
+  const id = nested.id;
+  return typeof id === "string" ? id : void 0;
+}
+function readNestedId(value, key) {
+  return readId(value, key);
+}
+function readThreads(value) {
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+  const record = value;
+  const threads = Array.isArray(record.threads) ? record.threads : record.data;
+  if (!Array.isArray(threads)) {
+    return [];
+  }
+  return threads.flatMap((thread) => {
+    if (!thread || typeof thread !== "object") {
+      return [];
+    }
+    const record2 = thread;
+    if (typeof record2.id !== "string") {
+      return [];
+    }
+    return [
+      {
+        id: record2.id,
+        cwd: typeof record2.cwd === "string" ? record2.cwd : void 0,
+        title: readOptionalString(record2.title) ?? readOptionalString(record2.name) ?? readOptionalString(record2.preview),
+        updatedAt: readOptionalDateTime(record2.updatedAt)
+      }
+    ];
+  });
+}
+function readOptionalString(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+  return void 0;
+}
+function readOptionalDateTime(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return new Date(value * 1e3).toISOString();
+  }
+  return void 0;
+}
+function readText(value) {
+  if (!value) {
+    return void 0;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const text = readText(item);
+      if (text) {
+        return text;
+      }
+    }
+    return void 0;
+  }
+  if (typeof value !== "object") {
+    return void 0;
+  }
+  const record = value;
+  if (typeof record.text === "string") {
+    return record.text;
+  }
+  if (typeof record.delta === "string") {
+    return record.delta;
+  }
+  if (record.delta) {
+    const deltaText = readText(record.delta);
+    if (deltaText) {
+      return deltaText;
+    }
+  }
+  if (record.content) {
+    const contentText = readText(record.content);
+    if (contentText) {
+      return contentText;
+    }
+  }
+  if (record.message) {
+    const messageText = readText(record.message);
+    if (messageText) {
+      return messageText;
+    }
+  }
+  if (record.item) {
+    const itemText = readText(record.item);
+    if (itemText) {
+      return itemText;
+    }
+  }
+  return void 0;
+}
+function readAgentTexts(value) {
+  if (!value) {
+    return [];
+  }
+  if (typeof value === "string") {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => readAgentTexts(item));
+  }
+  if (typeof value !== "object") {
+    return [];
+  }
+  const record = value;
+  if (record.type === "userMessage") {
+    return [];
+  }
+  const ownText = typeof record.text === "string" ? [record.text] : [];
+  return [
+    ...ownText,
+    ...readAgentTexts(record.delta),
+    ...readAgentTexts(record.content),
+    ...readAgentTexts(record.message),
+    ...readAgentTexts(record.item),
+    ...readAgentTexts(record.items),
+    ...readAgentTexts(record.turns),
+    ...readAgentTexts(record.thread)
+  ];
+}
+function readCompletedAgentMessageText(value) {
+  if (!value || typeof value !== "object") {
+    return void 0;
+  }
+  const item = value.item;
+  if (!item || typeof item !== "object") {
+    return readText(value);
+  }
+  const record = item;
+  if (record.type === "userMessage") {
+    return void 0;
+  }
+  return readText(item);
+}
+
+// ../agent-host/src/adapters/codexAdapter.ts
+var CodexAdapter = class {
+  constructor(options) {
+    this.options = options;
+  }
+  id = "codex";
+  displayName = "Codex";
+  async start(options) {
+    const child = this.spawnAppServer(options.workspace);
+    return createAppServerCodexProcess({
+      child,
+      options: {
+        clientInfo: {
+          name: "agent_mobile_vscode",
+          title: "Agent Mobile VS Code",
+          version: "0.1.0"
+        },
+        cwd: options.workspace,
+        onOutput: options.onOutput,
+        onExit: options.onExit
+      }
+    });
+  }
+  async discoverSessions(options) {
+    const child = this.spawnAppServer(options.workspace);
+    const client = new AppServerClient(child, {
+      clientInfo: {
+        name: "agent_mobile_vscode",
+        title: "Agent Mobile VS Code",
+        version: "0.1.0"
+      },
+      cwd: options.workspace,
+      onOutput: () => void 0,
+      onExit: () => void 0
+    });
+    try {
+      await client.initialize();
+      const threads = await client.listThreads();
+      return threads.map((thread) => ({
+        id: thread.id,
+        workspace: thread.cwd ?? options.workspace,
+        title: thread.title,
+        updatedAt: thread.updatedAt
+      }));
+    } finally {
+      child.kill();
+    }
+  }
+  async attachSession(options) {
+    const child = this.spawnAppServer(options.workspace);
+    return createAttachedAppServerCodexProcess({
+      child,
+      threadId: options.externalId,
+      options: {
+        clientInfo: {
+          name: "agent_mobile_vscode",
+          title: "Agent Mobile VS Code",
+          version: "0.1.0"
+        },
+        cwd: options.workspace,
+        onOutput: options.onOutput,
+        onExit: options.onExit
+      }
+    });
+  }
+  spawnAppServer(workspace) {
+    return (0, import_node_child_process.spawn)(this.options.command, ["app-server", "--listen", "stdio://"], {
+      cwd: workspace,
+      shell: process.platform === "win32",
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        RUST_LOG: process.env.RUST_LOG ?? "error"
+      }
+    });
+  }
+};
+
 // ../agent-host/src/relayClient.ts
 function startRelayClient(options) {
   const url = new URL("/host", options.relayUrl);
@@ -46426,6 +46455,7 @@ async function handleRelayMessage(manager, raw) {
 }
 
 // ../agent-host/src/server.ts
+var import_node_crypto2 = require("node:crypto");
 var import_websocket = __toESM(require_websocket2(), 1);
 var import_fastify = __toESM(require_fastify(), 1);
 
@@ -46789,7 +46819,9 @@ var approvalResponseSchema = external_exports.object({
 function buildServer(options) {
   const app = (0, import_fastify.default)({ logger: false });
   const accessTokens = /* @__PURE__ */ new Map();
-  const devices = /* @__PURE__ */ new Map();
+  const devices = new Map(
+    (options.trustedDevices ?? []).map((device) => [device.deviceId, device])
+  );
   app.register(import_websocket.default);
   app.get("/health", async () => ({
     ok: true,
@@ -46802,17 +46834,22 @@ function buildServer(options) {
     if (!body.success || body.data.pairingToken !== options.pairingToken) {
       return reply.code(401).send({ error: "Invalid pairing token" });
     }
-    const accessToken = `access_${nanoid(32)}`;
-    accessTokens.set(accessToken, { deviceId: body.data.deviceId });
+    const existing = devices.get(body.data.deviceId);
+    if (existing && !existing.revokedAt) {
+      return reply.code(409).send({ error: "Device already paired" });
+    }
+    const accessToken = issueAccessToken(body.data.deviceId, accessTokens);
+    const deviceSecret = createDeviceSecret();
     devices.set(body.data.deviceId, {
       deviceId: body.data.deviceId,
       clientType: body.data.clientType ?? "android-app",
-      pairedAt: (/* @__PURE__ */ new Date()).toISOString()
+      pairedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      deviceSecretHash: hashDeviceSecret(deviceSecret)
     });
-    return { accessToken };
+    return { accessToken, deviceId: body.data.deviceId, deviceSecret };
   });
   app.addHook("preHandler", async (request, reply) => {
-    if (request.url === "/health" || request.url === "/pair" || request.url.startsWith("/stream")) {
+    if (request.url === "/health" || request.url === "/pair" || request.url === "/devices/reauth" || request.url.startsWith("/stream")) {
       return;
     }
     if (request.url === "/status" && (request.headers["x-agent-mobile-pairing-token"] === options.pairingToken || isLoopbackRequest(request))) {
@@ -46825,10 +46862,27 @@ function buildServer(options) {
       return reply.code(401).send({ error: "Unauthorized" });
     }
   });
-  app.get("/devices", async () => Array.from(devices.values()));
-  app.get("/status", async () => {
+  app.post("/devices/reauth", async (request, reply) => {
+    const body = reauthRequestSchema.safeParse(request.body);
+    if (!body.success) {
+      return reply.code(400).send({ error: "Invalid reauth request" });
+    }
+    const device = devices.get(body.data.deviceId);
+    if (!device || device.revokedAt || !verifyDeviceSecret(body.data.deviceSecret, device.deviceSecretHash)) {
+      return reply.code(401).send({ error: "Unauthorized" });
+    }
+    const accessToken = issueAccessToken(body.data.deviceId, accessTokens);
+    devices.set(body.data.deviceId, {
+      ...device,
+      lastSeenAt: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    return { accessToken };
+  });
+  app.get("/devices", async () => Array.from(devices.values()).map(toDeviceSummary));
+  app.get("/status", async (request) => {
     await options.manager.syncDesktopSessions();
     const sessions = options.manager.listSessions();
+    const trustedDevices = Array.from(devices.values());
     const pairingPayload = {
       host: options.advertisedHost ?? "127.0.0.1",
       port: options.port ?? 17365,
@@ -46848,7 +46902,8 @@ function buildServer(options) {
         enabled: true,
         pairingPayload
       },
-      devices: Array.from(devices.values()),
+      devices: trustedDevices.map(toDeviceSummary),
+      trustedDevices: request.headers["x-agent-mobile-pairing-token"] === options.pairingToken || isLoopbackRequest(request) ? trustedDevices : [],
       agents: buildAgentSummaries(sessions, options.manager.getAdapterAvailability()),
       sessions
     };
@@ -47008,22 +47063,61 @@ function getQueryParam(request, name) {
 function isLoopbackRequest(request) {
   return request.ip === "127.0.0.1" || request.ip === "::1" || request.ip === "::ffff:127.0.0.1";
 }
+function issueAccessToken(deviceId, accessTokens) {
+  const accessToken = `access_${nanoid(32)}`;
+  accessTokens.set(accessToken, { deviceId });
+  return accessToken;
+}
+function createDeviceSecret() {
+  return `secret_${nanoid(32)}`;
+}
+function hashDeviceSecret(deviceSecret) {
+  const salt = (0, import_node_crypto2.randomBytes)(16).toString("hex");
+  const digest = (0, import_node_crypto2.createHash)("sha256").update(`${salt}:${deviceSecret}`).digest("hex");
+  return `sha256:${salt}:${digest}`;
+}
+function verifyDeviceSecret(deviceSecret, deviceSecretHash) {
+  const [algorithm, salt, expectedDigest] = deviceSecretHash.split(":");
+  if (algorithm !== "sha256" || !salt || !expectedDigest) {
+    return false;
+  }
+  const actualDigest = (0, import_node_crypto2.createHash)("sha256").update(`${salt}:${deviceSecret}`).digest("hex");
+  const actualBuffer = Buffer.from(actualDigest, "hex");
+  const expectedBuffer = Buffer.from(expectedDigest, "hex");
+  if (actualBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+  return (0, import_node_crypto2.timingSafeEqual)(actualBuffer, expectedBuffer);
+}
+function toDeviceSummary(device) {
+  return deviceSummarySchema.parse({
+    deviceId: device.deviceId,
+    clientType: device.clientType,
+    pairedAt: device.pairedAt,
+    revokedAt: device.revokedAt
+  });
+}
 
 // ../agent-host/src/cli.ts
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+var import_meta = {};
+var trustedDeviceRecordListSchema = external_exports.array(trustedDeviceRecordSchema);
+if (isDirectExecution(import_meta.url, process.argv[1])) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
 async function main() {
   const port = Number(readArg("--port") ?? process.env.AGENT_MOBILE_PORT ?? 17365);
   const host = readArg("--host") ?? process.env.AGENT_MOBILE_HOST ?? "127.0.0.1";
   const workspace = readArg("--workspace") ?? process.cwd();
   const codexCommand = readArg("--codex-command") ?? "codex";
   const eventCacheSize = Number(readArg("--event-cache-size") ?? 500);
-  const pairingToken = readArg("--pairing-token") ?? `pair_${(0, import_node_crypto2.randomBytes)(18).toString("hex")}`;
+  const pairingToken = readArg("--pairing-token") ?? `pair_${(0, import_node_crypto3.randomBytes)(18).toString("hex")}`;
   const relayUrl = readArg("--relay-url") ?? process.env.AGENT_MOBILE_RELAY_URL;
   const relayHostId = readArg("--relay-host-id") ?? process.env.AGENT_MOBILE_RELAY_HOST_ID;
   const relayToken = readArg("--relay-token") ?? process.env.AGENT_MOBILE_RELAY_TOKEN;
+  const trustedDevices = parseTrustedDevicesArgument(readArg("--trusted-devices"));
   const advertisedHost = host === "0.0.0.0" ? firstLanAddress() ?? "127.0.0.1" : host;
   const manager = new SessionManager({
     adapter: new CodexAdapter({ command: codexCommand, args: [] }),
@@ -47038,6 +47132,7 @@ async function main() {
     deviceName: "VS Code",
     advertisedHost,
     port,
+    trustedDevices,
     stopHost: async () => {
       setTimeout(() => {
         void app.close().finally(() => process.exit(0));
@@ -47061,6 +47156,12 @@ function readArg(name) {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : void 0;
 }
+function parseTrustedDevicesArgument(value) {
+  if (!value) {
+    return [];
+  }
+  return trustedDeviceRecordListSchema.parse(JSON.parse(value));
+}
 function firstLanAddress() {
   for (const infos of Object.values((0, import_node_os.networkInterfaces)())) {
     for (const info of infos ?? []) {
@@ -47071,6 +47172,13 @@ function firstLanAddress() {
   }
   return void 0;
 }
+function isDirectExecution(moduleUrl, entryArg) {
+  return Boolean(entryArg && (0, import_node_url.fileURLToPath)(moduleUrl) === entryArg);
+}
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
+  parseTrustedDevicesArgument
+});
 /*! Bundled license information:
 
 safe-buffer/index.js:

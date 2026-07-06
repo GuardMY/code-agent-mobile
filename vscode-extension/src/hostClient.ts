@@ -28,10 +28,6 @@ export interface LocalHostSessionClientOptions {
   webSocketFactory?: (url: string) => WebSocketLike;
 }
 
-interface PairResponse {
-  accessToken: string;
-}
-
 export class LocalHostSessionClient {
   private accessToken?: string;
   private readonly fetchImpl: typeof fetch;
@@ -182,7 +178,10 @@ export class LocalHostSessionClient {
     if (!response.ok) {
       throw new Error(await readError(response));
     }
-    const body = (await response.json()) as PairResponse;
+    const body = (await response.json()) as { accessToken?: unknown };
+    if (typeof body.accessToken !== "string" || body.accessToken.length === 0) {
+      throw new Error("Host pair response did not include an access token");
+    }
     this.accessToken = body.accessToken;
     return body.accessToken;
   }
