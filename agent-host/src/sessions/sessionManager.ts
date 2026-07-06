@@ -128,7 +128,25 @@ export class SessionManager {
     if (!discovered) {
       return;
     }
-    for (const session of discovered.filter((item) => normalizePath(item.workspace) === normalizePath(this.options.workspace))) {
+    const workspaceSessions = discovered.filter(
+      (item) => normalizePath(item.workspace) === normalizePath(this.options.workspace)
+    );
+    const discoveredExternalIds = new Set(workspaceSessions.map((session) => session.id));
+
+    for (const [sessionId, record] of this.sessions.entries()) {
+      if (
+        record.summary.adapterId !== this.options.adapter.id ||
+        !record.externalId ||
+        normalizePath(record.summary.workspace) !== normalizePath(this.options.workspace)
+      ) {
+        continue;
+      }
+      if (!discoveredExternalIds.has(record.externalId) && !record.process) {
+        this.sessions.delete(sessionId);
+      }
+    }
+
+    for (const session of workspaceSessions) {
       const sessionId = `${this.options.adapter.id}_${session.id}`;
       const existing = this.sessions.get(sessionId);
       if (existing) {
@@ -156,7 +174,7 @@ export class SessionManager {
   }
 
   getAdapterAvailability(): AgentAvailability {
-    return this.desktopSyncError ? "missing" : "unknown";
+    return this.desktopSyncError ? "missing" : "available";
   }
 
   async createSession(): Promise<SessionSummary> {
@@ -175,7 +193,10 @@ export class SessionManager {
       },
       onExit: (exitCode) => {
         const record = this.sessions.get(sessionId);
-        if (record && record.summary.status === "running") {
+        if (record) {
+          record.process = undefined;
+        }
+        if (record?.summary.status === "running") {
           record.summary.status = exitCode === 0 ? "exited" : "failed";
           this.appendEvent({
             type: "session.finished",
@@ -213,6 +234,11 @@ export class SessionManager {
     }
     const line = input.endsWith("\n") ? input : `${input}\n`;
     await record.process.sendInput(line);
+    this.appendEvent({
+      type: "agent.input",
+      sessionId,
+      payload: { text: input }
+    });
     record.summary.lastSeq = this.seq;
   }
 
@@ -232,10 +258,17 @@ export class SessionManager {
 
   async stopSession(sessionId: string): Promise<void> {
     const record = this.requireSession(sessionId);
-    if (record.summary.status !== "running" || !record.process) {
+    if (record.summary.status !== "running") {
       throw new NonRunningSessionError(sessionId, record.summary.status);
     }
+    if (!record.process) {
+      if (!record.externalId) {
+        throw new NonRunningSessionError(sessionId, record.summary.status);
+      }
+      record.process = await this.attachDesktopSession(sessionId, record.externalId);
+    }
     const exitCode = await record.process.stop();
+    record.process = undefined;
     record.summary.status = "stopped" satisfies SessionStatus;
     this.appendEvent({
       type: "session.finished",
@@ -346,7 +379,10 @@ export class SessionManager {
       },
       onExit: (exitCode) => {
         const record = this.sessions.get(sessionId);
-        if (record && record.summary.status === "running") {
+        if (record) {
+          record.process = undefined;
+        }
+        if (record?.summary.status === "running") {
           record.summary.status = exitCode === 0 ? "exited" : "failed";
           this.appendEvent({
             type: "session.finished",

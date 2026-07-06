@@ -113,7 +113,7 @@ class ConsoleViewModel(
         if (text.isBlank() || session.status != "running") return
         val trimmedText = text.trim()
         _state.update {
-            it.copy(lines = it.lines + ConsoleLine(it.lastSeq, trimmedText, ConsoleLineRole.USER, session.id), error = null)
+            it.copy(lines = it.lines + ConsoleLine(nextLocalSeq(it.lines), trimmedText, ConsoleLineRole.USER, session.id), error = null)
         }
         viewModelScope.launch(ioDispatcher) {
             runCatching { client.sendInput(connection, session.id, trimmedText) }
@@ -152,14 +152,15 @@ class ConsoleViewModel(
                 val event = JSONObject(text)
                 val seq = event.getLong("seq")
                 val type = event.getString("type")
-                if (type == "agent.output") {
+                if (type == "agent.output" || type == "agent.input") {
                     val output = event.getJSONObject("payload").getString("text")
                     val sessionId = event.optString("sessionId").ifBlank { null }
+                    val role = if (type == "agent.input") ConsoleLineRole.USER else ConsoleLineRole.AGENT
                     _state.update {
                         it.copy(
                             lastSeq = seq,
                             connected = true,
-                            lines = mergeLines(it.lines, listOf(ConsoleLine(seq, output, ConsoleLineRole.AGENT, sessionId))),
+                            lines = mergeLines(it.lines, listOf(ConsoleLine(seq, output, role, sessionId))),
                             error = null
                         )
                     }
@@ -256,6 +257,13 @@ class ConsoleViewModel(
         (current + incoming)
             .distinctBy { line -> "${line.seq}:${line.sessionId}:${line.role}:${line.text}" }
             .sortedBy { line -> line.seq }
+
+    private fun nextLocalSeq(lines: List<ConsoleLine>): Long =
+        lines.map { it.seq }
+            .filter { it < 0 }
+            .minOrNull()
+            ?.minus(1)
+            ?: -1L
 
     private fun parseApproval(item: JSONObject): ApprovalRequest =
         ApprovalRequest(

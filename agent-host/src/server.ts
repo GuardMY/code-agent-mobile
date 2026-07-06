@@ -39,6 +39,7 @@ export interface ServerOptions {
   advertisedHost?: string;
   port?: number;
   accessTokenTtlMs?: number;
+  stopHost?: () => Promise<void> | void;
 }
 
 export function buildServer(options: ServerOptions): FastifyInstance {
@@ -75,7 +76,13 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     if (request.url === "/health" || request.url === "/pair" || request.url.startsWith("/stream")) {
       return;
     }
-    if (request.url === "/status" && request.headers["x-agent-mobile-pairing-token"] === options.pairingToken) {
+    if (
+      request.url === "/status" &&
+      (request.headers["x-agent-mobile-pairing-token"] === options.pairingToken || isLoopbackRequest(request))
+    ) {
+      return;
+    }
+    if (request.url === "/host/control" && request.headers["x-agent-mobile-pairing-token"] === options.pairingToken) {
       return;
     }
     if (!isAuthorized(request, accessTokens, devices)) {
@@ -151,6 +158,14 @@ export function buildServer(options: ServerOptions): FastifyInstance {
   app.post("/sessions", async (_request, reply) =>
     reply.code(409).send({ error: "Start Codex sessions on the desktop first" })
   );
+
+  app.post("/host/control", async (request, reply) => {
+    const body = controlRequestSchema.parse(request.body);
+    if (body.command === "stop") {
+      await options.stopHost?.();
+    }
+    return reply.code(202).send({ ok: true });
+  });
 
   app.post("/sessions/:id/input", async (request, reply) => {
     const params = z.object({ id: z.string() }).parse(request.params);
@@ -284,4 +299,8 @@ function getQueryParam(request: FastifyRequest, name: string): string | undefine
     return Array.isArray(value) ? value[0] : value;
   }
   return new URL(request.url, "http://agent-mobile.local").searchParams.get(name) ?? undefined;
+}
+
+function isLoopbackRequest(request: FastifyRequest): boolean {
+  return request.ip === "127.0.0.1" || request.ip === "::1" || request.ip === "::ffff:127.0.0.1";
 }

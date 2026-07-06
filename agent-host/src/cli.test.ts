@@ -8,4 +8,11 @@ describe("agent host CLI", () => {
     expect(source).not.toContain("FileSessionStorage");
     expect(source).not.toContain("loadFromStorage");
   });
+
+  it("avoids top-level await so the bundled host can be packaged as CommonJS", async () => {
+    const source = await readFile(new URL("./cli.ts", import.meta.url), "utf8");
+
+    expect(source).toContain("async function main()");
+    expect(source).toContain("main().catch");
+  });
 });

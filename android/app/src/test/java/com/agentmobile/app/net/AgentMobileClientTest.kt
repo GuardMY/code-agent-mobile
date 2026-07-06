@@ -139,6 +139,52 @@ class AgentMobileClientTest {
     }
 
     @Test
+    fun listEventsParsesUserInputAndAgentOutput() {
+        MockWebServer().use { server ->
+            server.enqueue(
+                MockResponse().setBody(
+                    """
+                    [
+                      {
+                        "id": "msg_1",
+                        "type": "agent.input",
+                        "sessionId": "sess_1",
+                        "deviceId": "agent-host",
+                        "timestamp": "2026-07-02T12:00:00.000Z",
+                        "seq": 1,
+                        "payload": {
+                          "text": "你好"
+                        }
+                      },
+                      {
+                        "id": "msg_2",
+                        "type": "agent.output",
+                        "sessionId": "sess_1",
+                        "deviceId": "agent-host",
+                        "timestamp": "2026-07-02T12:00:01.000Z",
+                        "seq": 2,
+                        "payload": {
+                          "text": "你好。请直接说需求。"
+                        }
+                      }
+                    ]
+                    """.trimIndent()
+                )
+            )
+            server.start()
+            val client = AgentMobileClient()
+
+            val lines = client.listEvents(ConnectionInfo(server.hostName, server.port, "access_123"), 0)
+
+            assertEquals(2, lines.size)
+            assertEquals("你好", lines[0].text)
+            assertEquals("你好。请直接说需求。", lines[1].text)
+            assertEquals("sess_1", lines[0].sessionId)
+            assertEquals("sess_1", lines[1].sessionId)
+        }
+    }
+
+    @Test
     fun listApprovalsParsesPendingApprovals() {
         MockWebServer().use { server ->
             server.enqueue(

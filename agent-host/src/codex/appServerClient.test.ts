@@ -100,6 +100,164 @@ describe("appServerClient", () => {
     expect(outputs).toContain("hello");
   });
 
+  it("does not emit the completed agent message again after streaming the same reply", async () => {
+    const child = createFakeChild();
+    let buffer = "";
+
+    child.stdin.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      let index = buffer.indexOf("\n");
+      while (index >= 0) {
+        const line = buffer.slice(0, index);
+        buffer = buffer.slice(index + 1);
+        if (line.trim()) {
+          const message = JSON.parse(line) as { id?: number; method?: string };
+          if (message.id === 0) {
+            child.stdout.write(`${JSON.stringify({ id: 0, result: { ok: true } })}\n`);
+          } else if (message.id === 1) {
+            child.stdout.write(`${JSON.stringify({ id: 1, result: { thread: { id: "thr_1" } } })}\n`);
+          } else if (message.id === 2) {
+            child.stdout.write(`${JSON.stringify({ id: 2, result: { turn: { id: "turn_1" } } })}\n`);
+            child.stdout.write(`${JSON.stringify({ method: "turn/started", params: { turn: { id: "turn_1" } } })}\n`);
+            child.stdout.write(`${JSON.stringify({ method: "item/agentMessage/delta", params: { text: "你好。继续哪个任务？" } })}\n`);
+            child.stdout.write(
+              `${JSON.stringify({
+                method: "item/completed",
+                params: { item: { type: "agentMessage", text: "你好。继续哪个任务？" } }
+              })}\n`
+            );
+            child.stdout.write(`${JSON.stringify({ method: "turn/completed", params: { turn: { id: "turn_1" } } })}\n`);
+          }
+        }
+        index = buffer.indexOf("\n");
+      }
+    });
+
+    const outputs: string[] = [];
+    const process = await createAppServerCodexProcess({
+      child: child as never,
+      options: {
+        clientInfo: {
+          name: "agent_mobile_vscode",
+          title: "Agent Mobile VS Code",
+          version: "0.1.0"
+        },
+        cwd: "E:/repo",
+        onOutput: (_stream, text) => outputs.push(text),
+        onExit: vi.fn()
+      }
+    });
+
+    await process.sendInput("你好");
+
+    expect(outputs).toEqual(["你好。继续哪个任务？"]);
+  });
+
+  it("does not emit already-streamed agent text again when completion only adds a trailing newline", async () => {
+    const child = createFakeChild();
+    let buffer = "";
+
+    child.stdin.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      let index = buffer.indexOf("\n");
+      while (index >= 0) {
+        const line = buffer.slice(0, index);
+        buffer = buffer.slice(index + 1);
+        if (line.trim()) {
+          const message = JSON.parse(line) as { id?: number; method?: string };
+          if (message.id === 0) {
+            child.stdout.write(`${JSON.stringify({ id: 0, result: { ok: true } })}\n`);
+          } else if (message.id === 1) {
+            child.stdout.write(`${JSON.stringify({ id: 1, result: { thread: { id: "thr_1" } } })}\n`);
+          } else if (message.id === 2) {
+            child.stdout.write(`${JSON.stringify({ id: 2, result: { turn: { id: "turn_1" } } })}\n`);
+            child.stdout.write(`${JSON.stringify({ method: "turn/started", params: { turn: { id: "turn_1" } } })}\n`);
+            child.stdout.write(`${JSON.stringify({ method: "item/agentMessage/delta", params: { text: "Hello" } })}\n`);
+            child.stdout.write(
+              `${JSON.stringify({
+                method: "item/completed",
+                params: { item: { type: "agentMessage", text: "Hello\n" } }
+              })}\n`
+            );
+            child.stdout.write(`${JSON.stringify({ method: "turn/completed", params: { turn: { id: "turn_1" } } })}\n`);
+          }
+        }
+        index = buffer.indexOf("\n");
+      }
+    });
+
+    const outputs: string[] = [];
+    const process = await createAppServerCodexProcess({
+      child: child as never,
+      options: {
+        clientInfo: {
+          name: "agent_mobile_vscode",
+          title: "Agent Mobile VS Code",
+          version: "0.1.0"
+        },
+        cwd: "E:/repo",
+        onOutput: (_stream, text) => outputs.push(text),
+        onExit: vi.fn()
+      }
+    });
+
+    await process.sendInput("hello");
+
+    expect(outputs).toEqual(["Hello", "\n"]);
+  });
+
+  it("does not emit a completed user message as agent output", async () => {
+    const child = createFakeChild();
+    let buffer = "";
+
+    child.stdin.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      let index = buffer.indexOf("\n");
+      while (index >= 0) {
+        const line = buffer.slice(0, index);
+        buffer = buffer.slice(index + 1);
+        if (line.trim()) {
+          const message = JSON.parse(line) as { id?: number; method?: string };
+          if (message.id === 0) {
+            child.stdout.write(`${JSON.stringify({ id: 0, result: { ok: true } })}\n`);
+          } else if (message.id === 1) {
+            child.stdout.write(`${JSON.stringify({ id: 1, result: { thread: { id: "thr_1" } } })}\n`);
+          } else if (message.id === 2) {
+            child.stdout.write(`${JSON.stringify({ id: 2, result: { turn: { id: "turn_1" } } })}\n`);
+            child.stdout.write(`${JSON.stringify({ method: "turn/started", params: { turn: { id: "turn_1" } } })}\n`);
+            child.stdout.write(
+              `${JSON.stringify({
+                method: "item/completed",
+                params: { item: { type: "userMessage", text: "continue" } }
+              })}\n`
+            );
+            child.stdout.write(`${JSON.stringify({ method: "turn/completed", params: { turn: { id: "turn_1" } } })}\n`);
+          }
+        }
+        index = buffer.indexOf("\n");
+      }
+    });
+
+    const outputs: string[] = [];
+    const process = await createAppServerCodexProcess({
+      child: child as never,
+      options: {
+        clientInfo: {
+          name: "agent_mobile_vscode",
+          title: "Agent Mobile VS Code",
+          version: "0.1.0"
+        },
+        cwd: "E:/repo",
+        onOutput: (_stream, text) => outputs.push(text),
+        onExit: vi.fn()
+      }
+    });
+
+    await process.sendInput("continue");
+
+    expect(outputs).toEqual([]);
+  });
+
   it("lists existing Codex threads from app-server", async () => {
     const child = createFakeChild();
     const writes: string[] = [];
@@ -264,6 +422,56 @@ describe("appServerClient", () => {
     );
   });
 
+  it("stops an attached thread even if interrupt races with a completed turn", async () => {
+    const child = createFakeChild();
+    const writes: string[] = [];
+    child.stdin.on("data", (chunk) => {
+      for (const line of chunk.toString("utf8").split("\n")) {
+        if (!line.trim()) {
+          continue;
+        }
+        writes.push(line);
+        const message = JSON.parse(line) as { id?: number; method?: string };
+        if (message.id === 0) {
+          child.stdout.write(`${JSON.stringify({ id: 0, result: { ok: true } })}\n`);
+        } else if (message.id === 1) {
+          child.stdout.write(`${JSON.stringify({ id: 1, result: { thread: { id: "thr_existing" } } })}\n`);
+        } else if (message.id === 2) {
+          child.stdout.write(`${JSON.stringify({ id: 2, result: { turn: { id: "turn_existing" } } })}\n`);
+          child.stdout.write(`${JSON.stringify({ method: "turn/started", params: { turn: { id: "turn_existing" } } })}\n`);
+          child.stdout.write(`${JSON.stringify({ method: "turn/completed", params: { turn: { id: "turn_existing" } } })}\n`);
+        } else if (message.id === 3) {
+          child.stdout.write(`${JSON.stringify({ id: 3, error: { message: "turn already completed" } })}\n`);
+        }
+      }
+    });
+
+    const process = await createAttachedAppServerCodexProcess({
+      child: child as never,
+      threadId: "thr_existing",
+      options: {
+        clientInfo: { name: "agent_mobile_vscode", title: "Agent Mobile VS Code", version: "0.1.0" },
+        cwd: "E:/repo",
+        onOutput: vi.fn(),
+        onExit: vi.fn()
+      }
+    });
+
+    await process.sendInput("continue from phone");
+    await expect(process.stop()).resolves.toBe(0);
+
+    expect(writes).toContain(
+      JSON.stringify({
+        id: 3,
+        method: "turn/interrupt",
+        params: {
+          threadId: "thr_existing",
+          turnId: "turn_existing"
+        }
+      })
+    );
+  });
+
   it("emits historical text returned by thread resume", async () => {
     const child = createFakeChild();
     child.stdin.on("data", (chunk) => {
@@ -303,7 +511,7 @@ describe("appServerClient", () => {
     expect(outputs).toContain("previous answer");
   });
 
-  it("emits historical text from current Codex thread turns", async () => {
+  it("emits only historical agent text from current Codex thread turns", async () => {
     const child = createFakeChild();
     child.stdin.on("data", (chunk) => {
       for (const line of chunk.toString("utf8").split("\n")) {
@@ -354,6 +562,6 @@ describe("appServerClient", () => {
       }
     });
 
-    expect(outputs).toEqual(["previous question", "previous answer"]);
+    expect(outputs).toEqual(["previous answer"]);
   });
 });

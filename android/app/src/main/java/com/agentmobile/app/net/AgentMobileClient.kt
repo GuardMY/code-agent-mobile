@@ -206,13 +206,16 @@ class AgentMobileClient(
         )
 
     private fun parseConsoleLine(item: JSONObject): ConsoleLine? {
-        if (item.getString("type") != "agent.output") {
-            return null
+        val type = item.getString("type")
+        val role = when (type) {
+            "agent.input" -> ConsoleLineRole.USER
+            "agent.output" -> ConsoleLineRole.AGENT
+            else -> return null
         }
         return ConsoleLine(
             seq = item.getLong("seq"),
             text = item.getJSONObject("payload").getString("text"),
-            role = ConsoleLineRole.AGENT,
+            role = role,
             sessionId = item.optString("sessionId").ifBlank { null }
         )
     }

@@ -46,6 +46,14 @@ describe("SessionManager", () => {
     await manager.sendInput(session.id, "build this");
 
     expect(process.sendInput).toHaveBeenCalledWith("build this\n");
+    expect(manager.eventsAfter(0)).toEqual([
+      expect.objectContaining({ type: "session.started", sessionId: session.id }),
+      expect.objectContaining({
+        type: "agent.input",
+        sessionId: session.id,
+        payload: { text: "build this" }
+      })
+    ]);
   });
 
   it("marks a stopped session as stopped and emits a finished event", async () => {
@@ -175,6 +183,22 @@ describe("SessionManager", () => {
         status: "running"
       })
     ]);
+    expect(manager.getAdapterAvailability()).toBe("available");
+  });
+
+  it("marks the desktop adapter as available after a successful sync with no discovered sessions", async () => {
+    const adapter: AgentAdapter = {
+      id: "codex",
+      displayName: "Codex",
+      start: vi.fn(async () => ({ sendInput: vi.fn(), stop: vi.fn(async () => 0) })),
+      discoverSessions: vi.fn(async () => [])
+    };
+    const manager = new SessionManager({ adapter, eventCacheSize: 10, workspace: "E:/repo" });
+
+    await manager.syncDesktopSessions();
+
+    expect(manager.getAdapterAvailability()).toBe("available");
+    expect(manager.listSessions()).toEqual([]);
   });
 
   it("attaches to a desktop Codex thread before forwarding mobile input", async () => {
@@ -244,6 +268,70 @@ describe("SessionManager", () => {
     ]);
   });
 
+  it("attaches to a discovered desktop Codex thread before stopping it", async () => {
+    const process = { sendInput: vi.fn(), stop: vi.fn(async () => 0) };
+    const adapter: AgentAdapter = {
+      id: "codex",
+      displayName: "Codex",
+      start: vi.fn(async () => process),
+      discoverSessions: vi.fn(async () => [
+        {
+          id: "thr_desktop",
+          workspace: "E:/repo",
+          title: "Desktop thread",
+          updatedAt: "2026-07-02T20:00:00.000Z"
+        }
+      ]),
+      attachSession: vi.fn(async () => process)
+    };
+    const manager = new SessionManager({ adapter, eventCacheSize: 10, workspace: "E:/repo" });
+
+    await manager.syncDesktopSessions();
+    await manager.stopSession("codex_thr_desktop");
+
+    expect(adapter.attachSession).toHaveBeenCalledWith({
+      externalId: "thr_desktop",
+      sessionId: "codex_thr_desktop",
+      workspace: "E:/repo",
+      onOutput: expect.any(Function),
+      onExit: expect.any(Function)
+    });
+    expect(process.stop).toHaveBeenCalledOnce();
+    expect(manager.listSessions()[0].status).toBe("stopped");
+  });
+
+  it("keeps an attached desktop Codex thread when discovery temporarily stops reporting it", async () => {
+    const process = { sendInput: vi.fn(async () => undefined), stop: vi.fn(async () => 0) };
+    const adapter: AgentAdapter = {
+      id: "codex",
+      displayName: "Codex",
+      start: vi.fn(async () => process),
+      discoverSessions: vi.fn()
+        .mockResolvedValueOnce([
+          {
+            id: "thr_desktop",
+            workspace: "E:/repo",
+            title: "Desktop thread",
+            updatedAt: "2026-07-02T20:00:00.000Z"
+          }
+        ])
+        .mockResolvedValueOnce([]),
+      attachSession: vi.fn(async () => process)
+    };
+    const manager = new SessionManager({ adapter, eventCacheSize: 10, workspace: "E:/repo" });
+
+    await manager.syncDesktopSessions();
+    await manager.attachSession("codex_thr_desktop");
+    await manager.syncDesktopSessions();
+
+    expect(manager.listSessions()).toEqual([
+      expect.objectContaining({
+        id: "codex_thr_desktop",
+        status: "running"
+      })
+    ]);
+  });
+
   it("reopens a stopped desktop Codex thread when discovery still reports it", async () => {
     const stoppedProcess = { sendInput: vi.fn(), stop: vi.fn(async () => 0) };
     const reattachedProcess = { sendInput: vi.fn(), stop: vi.fn(async () => 0) };
@@ -274,5 +362,33 @@ describe("SessionManager", () => {
     expect(manager.listSessions()[0].status).toBe("running");
     expect(adapter.attachSession).toHaveBeenCalledTimes(2);
     expect(reattachedProcess.sendInput).toHaveBeenCalledWith("from phone\n");
+  });
+
+  it("removes desktop Codex sessions that disappear from discovery on the next sync", async () => {
+    const process = { sendInput: vi.fn(), stop: vi.fn(async () => 0) };
+    const adapter: AgentAdapter = {
+      id: "codex",
+      displayName: "Codex",
+      start: vi.fn(async () => process),
+      discoverSessions: vi.fn()
+        .mockResolvedValueOnce([
+          {
+            id: "thr_desktop",
+            workspace: "E:/repo",
+            title: "Desktop thread",
+            updatedAt: "2026-07-02T20:00:00.000Z"
+          }
+        ])
+        .mockResolvedValueOnce([]),
+      attachSession: vi.fn(async () => process)
+    };
+    const manager = new SessionManager({ adapter, eventCacheSize: 10, workspace: "E:/repo" });
+
+    await manager.syncDesktopSessions();
+    expect(manager.listSessions()).toHaveLength(1);
+
+    await manager.syncDesktopSessions();
+
+    expect(manager.listSessions()).toEqual([]);
   });
 });

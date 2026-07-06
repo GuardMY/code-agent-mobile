@@ -176,6 +176,29 @@ describe("agent host server", () => {
     expect(devices.json()).toMatchObject([{ deviceId: "wechat_1", clientType: "wechat-mini-program" }]);
   });
 
+  it("records VS Code extension clients during pairing", async () => {
+    const app = createTestServer();
+
+    const pairResponse = await app.inject({
+      method: "POST",
+      url: "/pair",
+      payload: {
+        pairingToken: "pairing-token-123",
+        deviceId: "vscode-extension",
+        clientType: "desktop-extension"
+      }
+    });
+    const token = pairResponse.json().accessToken;
+    const devices = await app.inject({
+      method: "GET",
+      url: "/devices",
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    expect(pairResponse.statusCode).toBe(200);
+    expect(devices.json()).toMatchObject([{ deviceId: "vscode-extension", clientType: "desktop-extension" }]);
+  });
+
   it("returns dashboard status with server, pairing, devices, agents, and sessions", async () => {
     const { app, manager } = createTestContext();
     const token = await pair(app);
@@ -206,12 +229,69 @@ describe("agent host server", () => {
       },
       devices: [{ deviceId: "android_1", clientType: "android-app" }],
       agents: [
-        { id: "codex", displayName: "Codex", activeSessions: 1, latestSessionStatus: "running" },
+        { id: "codex", displayName: "Codex", availability: "available", activeSessions: 1, latestSessionStatus: "running" },
         { id: "claude-code", displayName: "Claude Code", activeSessions: 0 },
         { id: "opencode", displayName: "OpenCode", activeSessions: 0 }
       ]
     });
     expect(response.json().sessions).toHaveLength(1);
+  });
+
+  it("allows loopback status discovery without the pairing token", async () => {
+    const { app, manager } = createTestContext();
+    await manager.createSession();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/status",
+      remoteAddress: "127.0.0.1"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      pairing: {
+        pairingPayload: {
+          pairingToken: "pairing-token-123"
+        }
+      },
+      sessions: [expect.objectContaining({ adapterId: "codex", status: "running" })]
+    });
+  });
+
+  it("rejects non-loopback status discovery without the pairing token", async () => {
+    const app = createTestServer();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/status",
+      remoteAddress: "192.168.1.22"
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("accepts a host stop request and calls the configured stop handler", async () => {
+    const stopHost = vi.fn(async () => undefined);
+    const manager = new SessionManager({ adapter, eventCacheSize: 10, workspace: "E:/repo" });
+    const app = buildServer({
+      manager,
+      version: "0.1.0",
+      lanEnabled: true,
+      pairingToken: "pairing-token-123",
+      deviceName: "devbox",
+      stopHost
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/host/control",
+      headers: { "x-agent-mobile-pairing-token": "pairing-token-123" },
+      payload: { command: "stop" }
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ ok: true });
+    expect(stopHost).toHaveBeenCalledOnce();
   });
 
   it("keeps dashboard status available when desktop Codex discovery fails", async () => {
@@ -407,6 +487,154 @@ describe("agent host server", () => {
 
     expect(response.statusCode).toBe(202);
     expect(desktopAdapter.attachSession).toHaveBeenCalledWith(expect.objectContaining({ externalId: "thr_desktop" }));
+  });
+
+  it("stops a discovered desktop Codex session even before it has been attached", async () => {
+    const process = {
+      sendInput: vi.fn(),
+      stop: vi.fn(async () => 0)
+    };
+    const desktopAdapter: AgentAdapter = {
+      id: "codex",
+      displayName: "Codex",
+      start: vi.fn(async () => process),
+      discoverSessions: vi.fn(async () => [
+        {
+          id: "thr_desktop",
+          workspace: "E:/repo",
+          updatedAt: "2026-07-02T20:00:00.000Z"
+        }
+      ]),
+      attachSession: vi.fn(async () => process)
+    };
+    const manager = new SessionManager({ adapter: desktopAdapter, eventCacheSize: 10, workspace: "E:/repo" });
+    const app = buildServer({
+      manager,
+      version: "0.1.0",
+      lanEnabled: true,
+      pairingToken: "pairing-token-123",
+      deviceName: "devbox"
+    });
+    const token = await pair(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/sessions/codex_thr_desktop/control",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { command: "stop" }
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(desktopAdapter.attachSession).toHaveBeenCalledWith(expect.objectContaining({ externalId: "thr_desktop" }));
+    expect(process.stop).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an attached desktop session stoppable even if discovery stops reporting it after input", async () => {
+    const process = {
+      sendInput: vi.fn(async () => undefined),
+      stop: vi.fn(async () => 0)
+    };
+    const desktopAdapter: AgentAdapter = {
+      id: "codex",
+      displayName: "Codex",
+      start: vi.fn(async () => process),
+      discoverSessions: vi.fn()
+        .mockResolvedValueOnce([
+          {
+            id: "thr_desktop",
+            workspace: "E:/repo",
+            updatedAt: "2026-07-02T20:00:00.000Z"
+          }
+        ])
+        .mockResolvedValueOnce([
+          {
+            id: "thr_desktop",
+            workspace: "E:/repo",
+            updatedAt: "2026-07-02T20:00:00.000Z"
+          }
+        ])
+        .mockResolvedValueOnce([]),
+      attachSession: vi.fn(async () => process)
+    };
+    const manager = new SessionManager({ adapter: desktopAdapter, eventCacheSize: 10, workspace: "E:/repo" });
+    const app = buildServer({
+      manager,
+      version: "0.1.0",
+      lanEnabled: true,
+      pairingToken: "pairing-token-123",
+      deviceName: "devbox"
+    });
+    const token = await pair(app);
+
+    await app.inject({
+      method: "POST",
+      url: "/sessions/codex_thr_desktop/attach",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    await app.inject({
+      method: "POST",
+      url: "/sessions/codex_thr_desktop/input",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { text: "continue" }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/sessions/codex_thr_desktop/control",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { command: "stop" }
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(process.stop).toHaveBeenCalledOnce();
+  });
+
+  it("drops archived desktop Codex sessions from the status payload on the next refresh", async () => {
+    const process = {
+      sendInput: vi.fn(),
+      stop: vi.fn(async () => 0)
+    };
+    const desktopAdapter: AgentAdapter = {
+      id: "codex",
+      displayName: "Codex",
+      start: vi.fn(async () => process),
+      discoverSessions: vi.fn()
+        .mockResolvedValueOnce([
+          {
+            id: "thr_desktop",
+            workspace: "E:/repo",
+            title: "Desktop thread",
+            updatedAt: "2026-07-02T20:00:00.000Z"
+          }
+        ])
+        .mockResolvedValueOnce([]),
+      attachSession: vi.fn(async () => process)
+    };
+    const manager = new SessionManager({ adapter: desktopAdapter, eventCacheSize: 10, workspace: "E:/repo" });
+    const app = buildServer({
+      manager,
+      version: "0.1.0",
+      lanEnabled: true,
+      pairingToken: "pairing-token-123",
+      deviceName: "devbox"
+    });
+    const token = await pair(app);
+
+    const first = await app.inject({
+      method: "GET",
+      url: "/status",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const second = await app.inject({
+      method: "GET",
+      url: "/status",
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    expect(first.statusCode).toBe(200);
+    expect(first.json().sessions).toEqual([expect.objectContaining({ id: "codex_thr_desktop" })]);
+    expect(second.statusCode).toBe(200);
+    expect(second.json().sessions).toEqual([]);
   });
 
   it("returns cached session events over HTTP after a sequence number", async () => {

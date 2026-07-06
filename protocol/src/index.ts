@@ -45,7 +45,7 @@ export const pairingPayloadSchema = z.object({
 });
 export type PairingPayload = z.infer<typeof pairingPayloadSchema>;
 
-export const clientTypeSchema = z.enum(["android-app", "ios-app", "wechat-mini-program", "unknown"]);
+export const clientTypeSchema = z.enum(["android-app", "ios-app", "wechat-mini-program", "desktop-extension", "unknown"]);
 export type ClientType = z.infer<typeof clientTypeSchema>;
 
 export const sessionStatusSchema = z.enum(["starting", "running", "stopped", "exited", "failed"]);

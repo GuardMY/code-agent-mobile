@@ -72,6 +72,7 @@ describe("protocol schemas", () => {
 
   it("accepts supported mobile client types", () => {
     expect(clientTypeSchema.parse("wechat-mini-program")).toBe("wechat-mini-program");
+    expect(clientTypeSchema.parse("desktop-extension")).toBe("desktop-extension");
     expect(clientTypeSchema.safeParse("browser").success).toBe(false);
   });
 
@@ -131,7 +132,7 @@ describe("protocol schemas", () => {
         {
           id: "codex",
           displayName: "Codex",
-          availability: "unknown",
+          availability: "available",
           activeSessions: 0
         }
       ],

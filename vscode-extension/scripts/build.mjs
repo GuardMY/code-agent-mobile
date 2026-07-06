@@ -7,9 +7,13 @@ import { build } from "esbuild";
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = resolve(scriptDir, "..");
 const distDir = resolve(packageDir, "dist");
+const bundledHostDir = resolve(packageDir, "host-dist", "agent-host");
+const bundledHostEntry = resolve(packageDir, "../agent-host/src/cli.ts");
 
 await rm(distDir, { recursive: true, force: true });
 await mkdir(distDir, { recursive: true });
+await rm(resolve(packageDir, "host-dist"), { recursive: true, force: true });
+await mkdir(bundledHostDir, { recursive: true });
 
 const tscBin = resolve(packageDir, "../node_modules/typescript/bin/tsc");
 
@@ -27,6 +31,18 @@ await build({
   platform: "node",
   target: "node20",
   external: ["vscode"],
+  sourcemap: false,
+  logLevel: "info"
+});
+
+await build({
+  absWorkingDir: packageDir,
+  entryPoints: [bundledHostEntry],
+  outfile: resolve(bundledHostDir, "cli.cjs"),
+  bundle: true,
+  format: "cjs",
+  platform: "node",
+  target: "node20",
   sourcemap: false,
   logLevel: "info"
 });

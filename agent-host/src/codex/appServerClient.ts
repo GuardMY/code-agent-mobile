@@ -32,7 +32,12 @@ export class AppServerCodexProcess implements AgentProcess {
   }
 
   async stop(): Promise<number> {
-    await this.client.interrupt();
+    try {
+      await this.client.interrupt();
+    } catch {
+      // A turn can complete between the last streamed output and a stop request.
+      // Killing the child still shuts down the attached app-server process cleanly.
+    }
     this.child.kill();
     return this.exited;
   }
@@ -50,6 +55,7 @@ export class AppServerClient {
   private threadId?: string;
   private turnId?: string;
   private turnInFlight = false;
+  private streamedAgentMessageText = "";
 
   constructor(
     private readonly child: ChildProcessWithoutNullStreams,
@@ -104,7 +110,7 @@ export class AppServerClient {
     const result = await this.request("thread/resume", { threadId });
     const resumedThreadId = readId(result, "thread") ?? threadId;
     this.threadId = resumedThreadId;
-    for (const text of readTexts(result)) {
+    for (const text of readAgentTexts(result)) {
       this.options.onOutput("stdout", text);
     }
     return resumedThreadId;
@@ -136,7 +142,7 @@ export class AppServerClient {
   }
 
   async interrupt(): Promise<void> {
-    if (!this.threadId || !this.turnId) {
+    if (!this.threadId || !this.turnId || !this.turnInFlight) {
       return;
     }
     await this.request("turn/interrupt", {
@@ -195,27 +201,39 @@ export class AppServerClient {
         this.turnId = turnId;
         this.turnInFlight = true;
       }
+      this.streamedAgentMessageText = "";
       return;
     }
 
     if (method === "turn/completed") {
       this.turnInFlight = false;
+      this.turnId = undefined;
+      this.streamedAgentMessageText = "";
       return;
     }
 
     if (method === "item/agentMessage/delta") {
       const text = readText(params);
       if (text) {
+        this.streamedAgentMessageText += text;
         this.options.onOutput("stdout", text);
       }
       return;
     }
 
     if (method === "item/completed") {
-      const text = readText(params);
+      const text = readCompletedAgentMessageText(params);
       if (text) {
-        this.options.onOutput("stdout", text);
+        const remainingText = text.startsWith(this.streamedAgentMessageText)
+          ? text.slice(this.streamedAgentMessageText.length)
+          : text === this.streamedAgentMessageText
+            ? ""
+            : text;
+        if (remainingText) {
+          this.options.onOutput("stdout", remainingText);
+        }
       }
+      this.streamedAgentMessageText = "";
     }
   }
 
@@ -385,7 +403,7 @@ function readText(value: unknown): string | undefined {
   return undefined;
 }
 
-function readTexts(value: unknown): string[] {
+function readAgentTexts(value: unknown): string[] {
   if (!value) {
     return [];
   }
@@ -393,21 +411,39 @@ function readTexts(value: unknown): string[] {
     return [];
   }
   if (Array.isArray(value)) {
-    return value.flatMap((item) => readTexts(item));
+    return value.flatMap((item) => readAgentTexts(item));
   }
   if (typeof value !== "object") {
     return [];
   }
   const record = value as Record<string, unknown>;
+  if (record.type === "userMessage") {
+    return [];
+  }
   const ownText = typeof record.text === "string" ? [record.text] : [];
   return [
     ...ownText,
-    ...readTexts(record.delta),
-    ...readTexts(record.content),
-    ...readTexts(record.message),
-    ...readTexts(record.item),
-    ...readTexts(record.items),
-    ...readTexts(record.turns),
-    ...readTexts(record.thread)
+    ...readAgentTexts(record.delta),
+    ...readAgentTexts(record.content),
+    ...readAgentTexts(record.message),
+    ...readAgentTexts(record.item),
+    ...readAgentTexts(record.items),
+    ...readAgentTexts(record.turns),
+    ...readAgentTexts(record.thread)
   ];
+}
+
+function readCompletedAgentMessageText(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const item = (value as Record<string, unknown>).item;
+  if (!item || typeof item !== "object") {
+    return readText(value);
+  }
+  const record = item as Record<string, unknown>;
+  if (record.type === "userMessage") {
+    return undefined;
+  }
+  return readText(item);
 }

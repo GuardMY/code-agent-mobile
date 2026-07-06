@@ -46,8 +46,39 @@ describe("LocalHostSessionClient", () => {
         body: JSON.stringify({
           pairingToken: "pairing-token-123",
           deviceId: "vscode-extension",
-          clientType: "unknown"
+          clientType: "desktop-extension"
         })
+      })
+    );
+  });
+
+  it("revokes a paired mobile device with the current access token", async () => {
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url);
+      if (href.endsWith("/pair")) {
+        return jsonResponse({ accessToken: "access_vscode", expiresAt: "2026-07-03T12:00:00.000Z" });
+      }
+      if (href.endsWith("/devices/android_1/revoke")) {
+        expect(init?.method).toBe("POST");
+        expect(init?.headers).toMatchObject({ authorization: "Bearer access_vscode" });
+        return jsonResponse({ ok: true }, 202);
+      }
+      throw new Error(`Unexpected request ${href}`);
+    });
+    const client = new LocalHostSessionClient({
+      host: "127.0.0.1",
+      port: 17365,
+      pairingToken: "pairing-token-123",
+      fetchImpl
+    });
+
+    await client.revokeDevice("android_1");
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://127.0.0.1:17365/devices/android_1/revoke",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ authorization: "Bearer access_vscode" })
       })
     );
   });

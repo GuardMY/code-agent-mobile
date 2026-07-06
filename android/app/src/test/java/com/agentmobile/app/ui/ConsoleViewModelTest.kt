@@ -186,6 +186,62 @@ class ConsoleViewModelTest {
     }
 
     @Test
+    fun agentInputAddsUserLineFromStream() = runTest(dispatcher) {
+        val client = FakeAgentMobileApi(sessions = listOf(session("sess_1", "running", 5)))
+        val viewModel = ConsoleViewModel(client, dispatcher, reconnectDelayMs = 1)
+
+        viewModel.connect(pairingJson())
+        advanceUntilIdle()
+        client.listener!!.onMessage(
+            FakeWebSocket(),
+            """
+            {
+              "type": "agent.input",
+              "sessionId": "sess_1",
+              "seq": 6,
+              "payload": {
+                "text": "你好"
+              }
+            }
+            """.trimIndent()
+        )
+
+        assertEquals(ConsoleLineRole.USER, viewModel.state.value.lines.single().role)
+        assertEquals("你好", viewModel.state.value.lines.single().text)
+    }
+
+    @Test
+    fun sendKeepsLocalUserLineAheadOfNextAgentOutput() = runTest(dispatcher) {
+        val client = FakeAgentMobileApi(sessions = listOf(session("sess_1", "running", 5)))
+        val viewModel = ConsoleViewModel(client, dispatcher, reconnectDelayMs = 1)
+
+        viewModel.connect(pairingJson())
+        advanceUntilIdle()
+        viewModel.selectSession("sess_1")
+        advanceUntilIdle()
+        viewModel.send("你好")
+        client.listener!!.onMessage(
+            FakeWebSocket(),
+            """
+            {
+              "type": "agent.output",
+              "sessionId": "sess_1",
+              "seq": 6,
+              "payload": {
+                "text": "你好。请直接说需求。"
+              }
+            }
+            """.trimIndent()
+        )
+
+        assertEquals(2, viewModel.state.value.lines.size)
+        assertEquals(ConsoleLineRole.USER, viewModel.state.value.lines[0].role)
+        assertEquals("你好", viewModel.state.value.lines[0].text)
+        assertEquals(ConsoleLineRole.AGENT, viewModel.state.value.lines[1].role)
+        assertEquals("你好。请直接说需求。", viewModel.state.value.lines[1].text)
+    }
+
+    @Test
     fun streamFailureSchedulesReconnectWithLastSeq() = runTest(dispatcher) {
         val client = FakeAgentMobileApi(sessions = listOf(session("sess_1", "running", 5)))
         val viewModel = ConsoleViewModel(client, dispatcher, reconnectDelayMs = 1)

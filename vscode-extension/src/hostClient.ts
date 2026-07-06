@@ -62,6 +62,12 @@ export class LocalHostSessionClient {
     });
   }
 
+  async revokeDevice(deviceId: string): Promise<void> {
+    await this.authorizedRequest(`/devices/${encodeURIComponent(deviceId)}/revoke`, {
+      method: "POST"
+    });
+  }
+
   async fetchEvents(lastSeq: number): Promise<SessionConsoleEvent[]> {
     const response = await this.authorizedRequest(`/events?lastSeq=${encodeURIComponent(String(lastSeq))}`, {
       method: "GET"
@@ -170,7 +176,7 @@ export class LocalHostSessionClient {
       body: JSON.stringify({
         pairingToken: this.options.pairingToken,
         deviceId: "vscode-extension",
-        clientType: "unknown"
+        clientType: "desktop-extension"
       })
     });
     if (!response.ok) {
