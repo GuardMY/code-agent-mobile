@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
-import type { ApprovalRequest, DeviceSummary, SessionSummary } from "@agent-mobile/protocol";
+import {
+  pairSuccessResponseSchema,
+  reauthResponseSchema,
+  type ApprovalRequest,
+  type DeviceSummary,
+  type SessionSummary,
+  type TrustedDeviceRecord
+} from "@agent-mobile/protocol";
 import { buildServer } from "./server.js";
 import { SessionManager, type AgentAdapter, type SessionStorage } from "./sessions/sessionManager.js";
 
@@ -13,7 +20,11 @@ const adapter: AgentAdapter = {
   })
 };
 
-function createTestContext(input: { storage?: SessionStorage; accessTokenTtlMs?: number } = {}) {
+function createTestContext(input: {
+  storage?: SessionStorage;
+  accessTokenTtlMs?: number;
+  trustedDevices?: TrustedDeviceRecord[];
+} = {}) {
   const manager = new SessionManager({ adapter, eventCacheSize: 10, workspace: "E:/repo", storage: input.storage });
   const app = buildServer({
     manager,
@@ -21,12 +32,17 @@ function createTestContext(input: { storage?: SessionStorage; accessTokenTtlMs?:
     lanEnabled: true,
     pairingToken: "pairing-token-123",
     deviceName: "devbox",
-    accessTokenTtlMs: input.accessTokenTtlMs
+    accessTokenTtlMs: input.accessTokenTtlMs,
+    trustedDevices: input.trustedDevices
   });
   return { app, manager };
 }
 
-function createTestServer(input: { storage?: SessionStorage; accessTokenTtlMs?: number } = {}) {
+function createTestServer(input: {
+  storage?: SessionStorage;
+  accessTokenTtlMs?: number;
+  trustedDevices?: TrustedDeviceRecord[];
+} = {}) {
   return createTestContext(input).app;
 }
 
@@ -70,6 +86,73 @@ describe("agent host server", () => {
     expect(response.json().accessToken).toMatch(/^access_/);
   });
 
+  it("returns device secret on first pairing and remembers the device", async () => {
+    const app = createTestServer();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/pair",
+      payload: { pairingToken: "pairing-token-123", deviceId: "android-001", clientType: "android-app" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = pairSuccessResponseSchema.parse(response.json());
+    expect(body.deviceId).toBe("android-001");
+    expect(body.deviceSecret).toMatch(/^secret_/);
+  });
+
+  it("allows re-pairing a revoked device id and rotates the trusted record", async () => {
+    const app = createTestServer();
+    const firstPairResponse = await app.inject({
+      method: "POST",
+      url: "/pair",
+      payload: { pairingToken: "pairing-token-123", deviceId: "android-001", clientType: "android-app" }
+    });
+    const firstPair = pairSuccessResponseSchema.parse(firstPairResponse.json());
+
+    const revoke = await app.inject({
+      method: "POST",
+      url: "/devices/android-001/revoke",
+      headers: { authorization: `Bearer ${firstPair.accessToken}` }
+    });
+    const secondPair = await app.inject({
+      method: "POST",
+      url: "/pair",
+      payload: { pairingToken: "pairing-token-123", deviceId: "android-001", clientType: "android-app" }
+    });
+    const secondPaired = pairSuccessResponseSchema.parse(secondPair.json());
+    const oldSecretReauth = await app.inject({
+      method: "POST",
+      url: "/devices/reauth",
+      payload: { deviceId: firstPair.deviceId, deviceSecret: firstPair.deviceSecret }
+    });
+    const newSecretReauth = await app.inject({
+      method: "POST",
+      url: "/devices/reauth",
+      payload: { deviceId: secondPaired.deviceId, deviceSecret: secondPaired.deviceSecret }
+    });
+    const status = await app.inject({
+      method: "GET",
+      url: "/status",
+      headers: { "x-agent-mobile-pairing-token": "pairing-token-123" },
+      remoteAddress: "127.0.0.1"
+    });
+
+    expect(revoke.statusCode).toBe(202);
+    expect(secondPair.statusCode).toBe(200);
+    expect(secondPaired.deviceSecret).toMatch(/^secret_/);
+    expect(secondPaired.deviceSecret).not.toBe(firstPair.deviceSecret);
+    expect(oldSecretReauth.statusCode).toBe(401);
+    expect(newSecretReauth.statusCode).toBe(200);
+    expect(status.json().trustedDevices).toEqual([
+      expect.objectContaining({
+        deviceId: "android-001",
+        clientType: "android-app"
+      })
+    ]);
+    expect(status.json().trustedDevices[0]).not.toHaveProperty("revokedAt");
+  });
+
   it("rejects an invalid pairing token", async () => {
     const app = createTestServer();
 
@@ -106,6 +189,62 @@ describe("agent host server", () => {
     });
 
     expect(response.statusCode).toBe(200);
+  });
+
+  it("issues a fresh access token for a remembered device", async () => {
+    const app = createTestServer();
+    const pairResponse = await app.inject({
+      method: "POST",
+      url: "/pair",
+      payload: { pairingToken: "pairing-token-123", deviceId: "android-001", clientType: "android-app" }
+    });
+    const paired = pairSuccessResponseSchema.parse(pairResponse.json());
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/devices/reauth",
+      payload: { deviceId: paired.deviceId, deviceSecret: paired.deviceSecret }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(reauthResponseSchema.parse(response.json()).accessToken).toMatch(/^access_/);
+  });
+
+  it("rejects malformed reauth input with a client error", async () => {
+    const app = createTestServer();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/devices/reauth",
+      payload: { deviceId: "android-001" }
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("loads bootstrapped trusted devices into the device list", async () => {
+    const app = createTestServer({
+      trustedDevices: [
+        {
+          deviceId: "desktop-001",
+          clientType: "desktop-extension",
+          pairedAt: "2026-07-06T09:00:00.000Z",
+          deviceSecretHash: "hash_bootstrap"
+        }
+      ]
+    });
+    const token = await pair(app);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/devices",
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ deviceId: "desktop-001", clientType: "desktop-extension" })])
+    );
   });
 
   it("returns conflict when sending input to a restored non-running session", async () => {
@@ -201,13 +340,18 @@ describe("agent host server", () => {
 
   it("returns dashboard status with server, pairing, devices, agents, and sessions", async () => {
     const { app, manager } = createTestContext();
-    const token = await pair(app);
+    await app.inject({
+      method: "POST",
+      url: "/pair",
+      payload: { pairingToken: "pairing-token-123", deviceId: "android_1", clientType: "android-app" }
+    });
     await manager.createSession();
 
     const response = await app.inject({
       method: "GET",
       url: "/status",
-      headers: { authorization: `Bearer ${token}` }
+      headers: { "x-agent-mobile-pairing-token": "pairing-token-123" },
+      remoteAddress: "127.0.0.1"
     });
 
     expect(response.statusCode).toBe(200);
@@ -235,6 +379,18 @@ describe("agent host server", () => {
       ]
     });
     expect(response.json().sessions).toHaveLength(1);
+    expect(response.json().trustedDevices).toEqual([
+      expect.objectContaining({
+        deviceId: "android_1",
+        clientType: "android-app",
+        deviceSecretHash: expect.any(String)
+      })
+    ]);
+    expect(response.json().devices).toEqual([
+      expect.not.objectContaining({
+        deviceSecretHash: expect.any(String)
+      })
+    ]);
   });
 
   it("allows loopback status discovery without the pairing token", async () => {
@@ -710,6 +866,30 @@ describe("agent host server", () => {
       method: "GET",
       url: "/sessions",
       headers: { authorization: `Bearer ${token}` }
+    });
+
+    expect(revoke.statusCode).toBe(202);
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("rejects reauth after revoke", async () => {
+    const app = createTestServer();
+    const pairResponse = await app.inject({
+      method: "POST",
+      url: "/pair",
+      payload: { pairingToken: "pairing-token-123", deviceId: "android-001", clientType: "android-app" }
+    });
+    const paired = pairSuccessResponseSchema.parse(pairResponse.json());
+
+    const revoke = await app.inject({
+      method: "POST",
+      url: "/devices/android-001/revoke",
+      headers: { authorization: `Bearer ${paired.accessToken}` }
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/devices/reauth",
+      payload: { deviceId: paired.deviceId, deviceSecret: paired.deviceSecret }
     });
 
     expect(revoke.statusCode).toBe(202);

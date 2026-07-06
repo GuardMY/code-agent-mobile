@@ -1,3 +1,4 @@
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import websocket from "@fastify/websocket";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { nanoid } from "nanoid";
@@ -5,10 +6,13 @@ import { z } from "zod";
 import {
   approvalDecisionSchema,
   clientTypeSchema,
+  deviceSummarySchema,
+  reauthRequestSchema,
   type AgentCapabilitySummary,
   type DeviceSummary,
   type PairingPayload,
-  type SessionSummary
+  type SessionSummary,
+  type TrustedDeviceRecord
 } from "@agent-mobile/protocol";
 import { NonRunningSessionError, type SessionManager } from "./sessions/sessionManager.js";
 
@@ -39,13 +43,16 @@ export interface ServerOptions {
   advertisedHost?: string;
   port?: number;
   accessTokenTtlMs?: number;
+  trustedDevices?: TrustedDeviceRecord[];
   stopHost?: () => Promise<void> | void;
 }
 
 export function buildServer(options: ServerOptions): FastifyInstance {
   const app = Fastify({ logger: false });
   const accessTokens = new Map<string, { deviceId: string }>();
-  const devices = new Map<string, DeviceSummary>();
+  const devices = new Map<string, TrustedDeviceRecord>(
+    (options.trustedDevices ?? []).map((device) => [device.deviceId, device])
+  );
 
   app.register(websocket);
 
@@ -61,19 +68,29 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     if (!body.success || body.data.pairingToken !== options.pairingToken) {
       return reply.code(401).send({ error: "Invalid pairing token" });
     }
+    const existing = devices.get(body.data.deviceId);
+    if (existing && !existing.revokedAt) {
+      return reply.code(409).send({ error: "Device already paired" });
+    }
 
-    const accessToken = `access_${nanoid(32)}`;
-    accessTokens.set(accessToken, { deviceId: body.data.deviceId });
+    const accessToken = issueAccessToken(body.data.deviceId, accessTokens);
+    const deviceSecret = createDeviceSecret();
     devices.set(body.data.deviceId, {
       deviceId: body.data.deviceId,
       clientType: body.data.clientType ?? "android-app",
-      pairedAt: new Date().toISOString()
+      pairedAt: new Date().toISOString(),
+      deviceSecretHash: hashDeviceSecret(deviceSecret)
     });
-    return { accessToken };
+    return { accessToken, deviceId: body.data.deviceId, deviceSecret };
   });
 
   app.addHook("preHandler", async (request, reply) => {
-    if (request.url === "/health" || request.url === "/pair" || request.url.startsWith("/stream")) {
+    if (
+      request.url === "/health" ||
+      request.url === "/pair" ||
+      request.url === "/devices/reauth" ||
+      request.url.startsWith("/stream")
+    ) {
       return;
     }
     if (
@@ -90,11 +107,30 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     }
   });
 
-  app.get("/devices", async () => Array.from(devices.values()));
+  app.post("/devices/reauth", async (request, reply) => {
+    const body = reauthRequestSchema.safeParse(request.body);
+    if (!body.success) {
+      return reply.code(400).send({ error: "Invalid reauth request" });
+    }
+    const device = devices.get(body.data.deviceId);
+    if (!device || device.revokedAt || !verifyDeviceSecret(body.data.deviceSecret, device.deviceSecretHash)) {
+      return reply.code(401).send({ error: "Unauthorized" });
+    }
 
-  app.get("/status", async () => {
+    const accessToken = issueAccessToken(body.data.deviceId, accessTokens);
+    devices.set(body.data.deviceId, {
+      ...device,
+      lastSeenAt: new Date().toISOString()
+    });
+    return { accessToken };
+  });
+
+  app.get("/devices", async () => Array.from(devices.values()).map(toDeviceSummary));
+
+  app.get("/status", async (request) => {
     await options.manager.syncDesktopSessions();
     const sessions = options.manager.listSessions();
+    const trustedDevices = Array.from(devices.values());
     const pairingPayload: PairingPayload = {
       host: options.advertisedHost ?? "127.0.0.1",
       port: options.port ?? 17365,
@@ -114,7 +150,11 @@ export function buildServer(options: ServerOptions): FastifyInstance {
         enabled: true,
         pairingPayload
       },
-      devices: Array.from(devices.values()),
+      devices: trustedDevices.map(toDeviceSummary),
+      trustedDevices:
+        request.headers["x-agent-mobile-pairing-token"] === options.pairingToken || isLoopbackRequest(request)
+          ? trustedDevices
+          : [],
       agents: buildAgentSummaries(sessions, options.manager.getAdapterAvailability()),
       sessions
     };
@@ -267,7 +307,7 @@ function buildAgentSummary(
 function isAuthorized(
   request: FastifyRequest,
   accessTokens: Map<string, { deviceId: string }>,
-  devices: Map<string, DeviceSummary>
+  devices: Map<string, TrustedDeviceRecord>
 ): boolean {
   const header = request.headers.authorization;
   if (!header?.startsWith("Bearer ")) {
@@ -279,7 +319,7 @@ function isAuthorized(
 function isAccessTokenValid(
   token: string,
   accessTokens: Map<string, { deviceId: string }>,
-  devices: Map<string, DeviceSummary>
+  devices: Map<string, TrustedDeviceRecord>
 ): boolean {
   const record = accessTokens.get(token);
   if (!record) {
@@ -303,4 +343,47 @@ function getQueryParam(request: FastifyRequest, name: string): string | undefine
 
 function isLoopbackRequest(request: FastifyRequest): boolean {
   return request.ip === "127.0.0.1" || request.ip === "::1" || request.ip === "::ffff:127.0.0.1";
+}
+
+function issueAccessToken(
+  deviceId: string,
+  accessTokens: Map<string, { deviceId: string }>
+): string {
+  const accessToken = `access_${nanoid(32)}`;
+  accessTokens.set(accessToken, { deviceId });
+  return accessToken;
+}
+
+function createDeviceSecret(): string {
+  return `secret_${nanoid(32)}`;
+}
+
+function hashDeviceSecret(deviceSecret: string): string {
+  const salt = randomBytes(16).toString("hex");
+  const digest = createHash("sha256").update(`${salt}:${deviceSecret}`).digest("hex");
+  return `sha256:${salt}:${digest}`;
+}
+
+function verifyDeviceSecret(deviceSecret: string, deviceSecretHash: string): boolean {
+  const [algorithm, salt, expectedDigest] = deviceSecretHash.split(":");
+  if (algorithm !== "sha256" || !salt || !expectedDigest) {
+    return false;
+  }
+
+  const actualDigest = createHash("sha256").update(`${salt}:${deviceSecret}`).digest("hex");
+  const actualBuffer = Buffer.from(actualDigest, "hex");
+  const expectedBuffer = Buffer.from(expectedDigest, "hex");
+  if (actualBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+  return timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function toDeviceSummary(device: TrustedDeviceRecord): DeviceSummary {
+  return deviceSummarySchema.parse({
+    deviceId: device.deviceId,
+    clientType: device.clientType,
+    pairedAt: device.pairedAt,
+    revokedAt: device.revokedAt
+  });
 }

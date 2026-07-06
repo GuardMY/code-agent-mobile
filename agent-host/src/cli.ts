@@ -1,14 +1,21 @@
+import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import { networkInterfaces } from "node:os";
+import { z } from "zod";
+import { trustedDeviceRecordSchema, type TrustedDeviceRecord } from "@agent-mobile/protocol";
 import { CodexAdapter } from "./adapters/codexAdapter.js";
 import { startRelayClient } from "./relayClient.js";
 import { buildServer } from "./server.js";
 import { SessionManager } from "./sessions/sessionManager.js";
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+const trustedDeviceRecordListSchema = z.array(trustedDeviceRecordSchema);
+
+if (isDirectExecution(import.meta.url, process.argv[1])) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
 
 async function main(): Promise<void> {
   const port = Number(readArg("--port") ?? process.env.AGENT_MOBILE_PORT ?? 17365);
@@ -20,6 +27,7 @@ async function main(): Promise<void> {
   const relayUrl = readArg("--relay-url") ?? process.env.AGENT_MOBILE_RELAY_URL;
   const relayHostId = readArg("--relay-host-id") ?? process.env.AGENT_MOBILE_RELAY_HOST_ID;
   const relayToken = readArg("--relay-token") ?? process.env.AGENT_MOBILE_RELAY_TOKEN;
+  const trustedDevices = parseTrustedDevicesArgument(readArg("--trusted-devices"));
   const advertisedHost = host === "0.0.0.0" ? firstLanAddress() ?? "127.0.0.1" : host;
   const manager = new SessionManager({
     adapter: new CodexAdapter({ command: codexCommand, args: [] }),
@@ -35,6 +43,7 @@ async function main(): Promise<void> {
     deviceName: "VS Code",
     advertisedHost,
     port,
+    trustedDevices,
     stopHost: async () => {
       setTimeout(() => {
         void app.close().finally(() => process.exit(0));
@@ -62,6 +71,13 @@ function readArg(name: string): string | undefined {
   return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
+export function parseTrustedDevicesArgument(value: string | undefined): TrustedDeviceRecord[] {
+  if (!value) {
+    return [];
+  }
+  return trustedDeviceRecordListSchema.parse(JSON.parse(value));
+}
+
 function firstLanAddress(): string | undefined {
   for (const infos of Object.values(networkInterfaces())) {
     for (const info of infos ?? []) {
@@ -71,4 +87,8 @@ function firstLanAddress(): string | undefined {
     }
   }
   return undefined;
+}
+
+function isDirectExecution(moduleUrl: string, entryArg: string | undefined): boolean {
+  return Boolean(entryArg && fileURLToPath(moduleUrl) === entryArg);
 }
