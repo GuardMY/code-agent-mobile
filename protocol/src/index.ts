@@ -45,6 +45,13 @@ export const pairingPayloadSchema = z.object({
 });
 export type PairingPayload = z.infer<typeof pairingPayloadSchema>;
 
+export const pairSuccessResponseSchema = z.object({
+  accessToken: z.string().min(1),
+  deviceId: z.string().min(1),
+  deviceSecret: z.string().min(1).optional()
+});
+export type PairSuccessResponse = z.infer<typeof pairSuccessResponseSchema>;
+
 export const clientTypeSchema = z.enum(["android-app", "ios-app", "wechat-mini-program", "desktop-extension", "unknown"]);
 export type ClientType = z.infer<typeof clientTypeSchema>;
 
@@ -69,6 +76,28 @@ export const deviceSummarySchema = z.object({
   revokedAt: z.string().datetime().optional()
 });
 export type DeviceSummary = z.infer<typeof deviceSummarySchema>;
+
+export const trustedDeviceRecordSchema = z.object({
+  deviceId: z.string().min(1),
+  clientType: clientTypeSchema,
+  displayName: z.string().min(1).optional(),
+  pairedAt: z.string().datetime(),
+  revokedAt: z.string().datetime().optional(),
+  deviceSecretHash: z.string().min(1),
+  lastSeenAt: z.string().datetime().optional()
+});
+export type TrustedDeviceRecord = z.infer<typeof trustedDeviceRecordSchema>;
+
+export const reauthRequestSchema = z.object({
+  deviceId: z.string().min(1),
+  deviceSecret: z.string().min(1)
+});
+export type ReauthRequest = z.infer<typeof reauthRequestSchema>;
+
+export const reauthResponseSchema = z.object({
+  accessToken: z.string().min(1)
+});
+export type ReauthResponse = z.infer<typeof reauthResponseSchema>;
 
 export const agentAvailabilitySchema = z.enum(["available", "missing", "unknown"]);
 export type AgentAvailability = z.infer<typeof agentAvailabilitySchema>;
@@ -96,6 +125,7 @@ export const hostDashboardStatusSchema = z.object({
     pairingPayload: pairingPayloadSchema
   }),
   devices: z.array(deviceSummarySchema),
+  trustedDevices: z.array(trustedDeviceRecordSchema).default([]),
   agents: z.array(agentCapabilitySummarySchema),
   sessions: z.array(sessionSummarySchema)
 });

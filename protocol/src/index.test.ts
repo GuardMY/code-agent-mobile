@@ -8,8 +8,12 @@ import {
   deviceSummarySchema,
   envelopeSchema,
   hostDashboardStatusSchema,
+  pairSuccessResponseSchema,
   pairingPayloadSchema,
-  sessionSummarySchema
+  reauthRequestSchema,
+  reauthResponseSchema,
+  sessionSummarySchema,
+  trustedDeviceRecordSchema
 } from "./index.js";
 
 describe("protocol schemas", () => {
@@ -70,6 +74,96 @@ describe("protocol schemas", () => {
     expect("accessTokenExpiresAt" in result).toBe(false);
   });
 
+  it("accepts trusted device persistence records with optional metadata", () => {
+    const result = trustedDeviceRecordSchema.parse({
+      deviceId: "desktop_1",
+      clientType: "desktop-extension",
+      displayName: "Alice Laptop",
+      pairedAt: "2026-07-01T10:00:00.000Z",
+      revokedAt: "2026-07-03T10:00:00.000Z",
+      deviceSecretHash: "hash_123",
+      lastSeenAt: "2026-07-05T10:00:00.000Z"
+    });
+
+    expect(result.displayName).toBe("Alice Laptop");
+    expect(result.deviceSecretHash).toBe("hash_123");
+    expect(result.lastSeenAt).toBe("2026-07-05T10:00:00.000Z");
+  });
+
+  it("requires a device secret hash for trusted device persistence records", () => {
+    const result = trustedDeviceRecordSchema.safeParse({
+      deviceId: "desktop_1",
+      clientType: "desktop-extension",
+      pairedAt: "2026-07-01T10:00:00.000Z"
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts pair success responses with device secrets", () => {
+    const result = pairSuccessResponseSchema.parse({
+      accessToken: "access_123",
+      deviceId: "android_1",
+      deviceSecret: "secret_123"
+    });
+
+    expect(result.accessToken).toBe("access_123");
+    expect(result.deviceSecret).toBe("secret_123");
+  });
+
+  it("accepts pair success responses without a device secret", () => {
+    const result = pairSuccessResponseSchema.safeParse({
+      accessToken: "access_123",
+      deviceId: "android_1"
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects pair success responses with a blank device secret", () => {
+    const result = pairSuccessResponseSchema.safeParse({
+      accessToken: "access_123",
+      deviceId: "android_1",
+      deviceSecret: ""
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts trusted-device reauth requests and responses", () => {
+    const request = reauthRequestSchema.parse({
+      deviceId: "android_1",
+      deviceSecret: "secret_123"
+    });
+    const response = reauthResponseSchema.parse({
+      accessToken: "access_123"
+    });
+
+    expect(request.deviceId).toBe("android_1");
+    expect(response.accessToken).toBe("access_123");
+  });
+
+  it("rejects reauth requests without a device secret", () => {
+    const result = reauthRequestSchema.safeParse({
+      deviceId: "android_1"
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects trusted device persistence records with malformed datetime fields", () => {
+    const result = trustedDeviceRecordSchema.safeParse({
+      deviceId: "desktop_1",
+      clientType: "desktop-extension",
+      pairedAt: "not-a-datetime",
+      revokedAt: "2026-07-03",
+      deviceSecretHash: "hash_123",
+      lastSeenAt: "yesterday"
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it("accepts supported mobile client types", () => {
     expect(clientTypeSchema.parse("wechat-mini-program")).toBe("wechat-mini-program");
     expect(clientTypeSchema.parse("desktop-extension")).toBe("desktop-extension");
@@ -128,6 +222,14 @@ describe("protocol schemas", () => {
           pairedAt: "2026-06-30T14:30:00.000Z"
         }
       ],
+      trustedDevices: [
+        {
+          deviceId: "wechat_1",
+          clientType: "wechat-mini-program",
+          pairedAt: "2026-06-30T14:30:00.000Z",
+          deviceSecretHash: "hash_123"
+        }
+      ],
       agents: [
         {
           id: "codex",
@@ -140,6 +242,34 @@ describe("protocol schemas", () => {
     });
 
     expect(result.devices[0].clientType).toBe("wechat-mini-program");
+    expect(result.trustedDevices[0]?.deviceSecretHash).toBe("hash_123");
+  });
+
+  it("treats missing trustedDevices in older host dashboard payloads as an empty list", () => {
+    const result = hostDashboardStatusSchema.parse({
+      server: {
+        running: true,
+        lanEnabled: false,
+        host: "127.0.0.1",
+        port: 17365,
+        deviceName: "VS Code",
+        version: "0.1.0"
+      },
+      pairing: {
+        enabled: true,
+        pairingPayload: {
+          host: "127.0.0.1",
+          port: 17365,
+          pairingToken: "pairing-token-123",
+          deviceName: "VS Code"
+        }
+      },
+      devices: [],
+      agents: [],
+      sessions: []
+    });
+
+    expect(result.trustedDevices).toEqual([]);
   });
 
   it("accepts approval requests and decisions", () => {
