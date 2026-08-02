@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { hostDashboardStatusSchema, type HostDashboardStatus } from "@agent-mobile/protocol";
-import type { AgentMobileConfig } from "./config.js";
+import type { AgentMobileConfig, RelayConfig } from "./config.js";
 import { buildHostArgs } from "./config.js";
 import type { TrustedDeviceRecord } from "./deviceRegistry.js";
 
@@ -109,6 +109,7 @@ export class HostController {
     workspace: string;
     pairingToken: string;
     config: AgentMobileConfig;
+    relay?: RelayConfig;
     trustedDevices?: TrustedDeviceRecord[];
     onOutput: (line: string) => void;
   }): Promise<HostStartResult> {
@@ -127,6 +128,7 @@ export class HostController {
     workspace: string;
     pairingToken: string;
     config: AgentMobileConfig;
+    relay?: RelayConfig;
     trustedDevices?: TrustedDeviceRecord[];
     onOutput: (line: string) => void;
   }): Promise<HostStartResult> {
@@ -136,7 +138,7 @@ export class HostController {
     });
     if (existing.reachable) {
       const wantsLan = input.host === "0.0.0.0";
-      if (existing.status.server.lanEnabled !== wantsLan) {
+      if (existing.status.server.lanEnabled !== wantsLan || !matchesRelay(existing.status, input.relay)) {
         await this.dependencies.requestHostStop({
           port: input.config.port,
           pairingToken: existing.status.pairing.pairingPayload.pairingToken
@@ -208,6 +210,18 @@ export class HostController {
   getStatus(): HostControllerStatus {
     return this.status;
   }
+}
+
+function matchesRelay(status: HostDashboardStatus, relay: RelayConfig | undefined): boolean {
+  const pairing = status.pairing.pairingPayload;
+  if (!relay) {
+    return !pairing.relayUrl && !pairing.hostId && !pairing.relayToken;
+  }
+  return (
+    pairing.relayUrl === relay.relayUrl &&
+    pairing.hostId === relay.hostId &&
+    pairing.relayToken === relay.relayToken
+  );
 }
 
 function waitForExit(child: ChildProcess, timeoutMs = 1500): Promise<void> {

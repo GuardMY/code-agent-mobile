@@ -24,6 +24,9 @@ function createTestContext(input: {
   storage?: SessionStorage;
   accessTokenTtlMs?: number;
   trustedDevices?: TrustedDeviceRecord[];
+  relayUrl?: string;
+  hostId?: string;
+  relayToken?: string;
 } = {}) {
   const manager = new SessionManager({ adapter, eventCacheSize: 10, workspace: "E:/repo", storage: input.storage });
   const app = buildServer({
@@ -33,7 +36,10 @@ function createTestContext(input: {
     pairingToken: "pairing-token-123",
     deviceName: "devbox",
     accessTokenTtlMs: input.accessTokenTtlMs,
-    trustedDevices: input.trustedDevices
+    trustedDevices: input.trustedDevices,
+    relayUrl: input.relayUrl,
+    hostId: input.hostId,
+    relayToken: input.relayToken
   });
   return { app, manager };
 }
@@ -42,6 +48,9 @@ function createTestServer(input: {
   storage?: SessionStorage;
   accessTokenTtlMs?: number;
   trustedDevices?: TrustedDeviceRecord[];
+  relayUrl?: string;
+  hostId?: string;
+  relayToken?: string;
 } = {}) {
   return createTestContext(input).app;
 }
@@ -393,6 +402,27 @@ describe("agent host server", () => {
     ]);
   });
 
+  it("includes configured relay credentials in the status pairing payload", async () => {
+    const app = createTestServer({
+      relayUrl: "wss://relay.example.com",
+      hostId: "host_12345678",
+      relayToken: "relay-token-123456"
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/status",
+      remoteAddress: "127.0.0.1"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().pairing.pairingPayload).toMatchObject({
+      relayUrl: "wss://relay.example.com",
+      hostId: "host_12345678",
+      relayToken: "relay-token-123456"
+    });
+  });
+
   it("allows loopback status discovery without the pairing token", async () => {
     const { app, manager } = createTestContext();
     await manager.createSession();
@@ -412,6 +442,19 @@ describe("agent host server", () => {
       },
       sessions: [expect.objectContaining({ adapterId: "codex", status: "running" })]
     });
+  });
+
+  it("requires authorization for relay-marked loopback status requests", async () => {
+    const app = createTestServer();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/status",
+      headers: { "x-agent-mobile-relay-request": "1" },
+      remoteAddress: "127.0.0.1"
+    });
+
+    expect(response.statusCode).toBe(401);
   });
 
   it("rejects non-loopback status discovery without the pairing token", async () => {

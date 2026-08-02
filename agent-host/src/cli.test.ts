@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { parseTrustedDevicesArgument } from "./index.js";
+import { parseTrustedDevicesArgument, resolveRelayOptions } from "./index.js";
 
 describe("agent host CLI", () => {
   it("parses trusted devices JSON for host bootstrap", () => {
@@ -29,6 +29,31 @@ describe("agent host CLI", () => {
 
   it("returns an empty trusted device list when bootstrap JSON is not provided", () => {
     expect(parseTrustedDevicesArgument(undefined)).toEqual([]);
+  });
+
+  it("validates a complete secure relay configuration", () => {
+    expect(
+      resolveRelayOptions({
+        relayUrl: "wss://relay.example.com/",
+        relayHostId: "host_12345678",
+        relayToken: "relay-token-123456"
+      })
+    ).toEqual({
+      relayUrl: "wss://relay.example.com",
+      hostId: "host_12345678",
+      relayToken: "relay-token-123456"
+    });
+  });
+
+  it("rejects incomplete or insecure relay configuration", () => {
+    expect(() => resolveRelayOptions({ relayUrl: "wss://relay.example.com" })).toThrow("configured together");
+    expect(() =>
+      resolveRelayOptions({
+        relayUrl: "ws://relay.example.com",
+        relayHostId: "host_12345678",
+        relayToken: "relay-token-123456"
+      })
+    ).toThrow("wss://");
   });
 
   it("does not configure file-backed session storage by default", async () => {

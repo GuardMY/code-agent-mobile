@@ -95,7 +95,7 @@ npm run package:extension
 Install the generated VSIX:
 
 ```powershell
-code --install-extension vscode-extension/agent-mobile-control-0.1.0.vsix
+code --install-extension vscode-extension/agent-mobile-control-0.2.0.vsix
 ```
 
 ## 6. Android App
@@ -111,23 +111,27 @@ If the Gradle wrapper is not present, use a local Gradle install or generate the
 
 ## 7. Gateway / Relay
 
-Run the relay:
+The optional Gateway gives Android public-network access without exposing the Agent Host HTTP port. Deploy it behind a TLS reverse proxy that forwards WebSocket upgrades for `/host` and `/app`. Android pairing accepts only a valid `wss://` endpoint.
+
+Run a Gateway with host-bound channel tokens:
 
 ```powershell
-npm run dev:gateway -- --host 127.0.0.1 --port 17366 --relay-token dev-relay-token
+npm run dev:gateway -- --host 0.0.0.0 --port 17366
 ```
 
-Start Host with relay settings:
+Alternatively, pass `--relay-token <unique-secret>` to use one static token for every channel. The default mode binds the first Host token to its `hostId`.
 
-```powershell
-npm run dev:host -- `
-  --host 127.0.0.1 `
-  --port 17365 `
-  --workspace E:\Code\code-agent-mobile `
-  --relay-url ws://127.0.0.1:17366 `
-  --relay-host-id dev-host-1 `
-  --relay-token dev-relay-token
+Configure the VS Code extension with a unique host ID and token before starting the Host:
+
+```json
+{
+  "agentMobile.relayUrl": "wss://relay.example.com",
+  "agentMobile.relayHostId": "host_8c02d1f5b2c84a58",
+  "agentMobile.relayToken": "replace-with-a-unique-secret-at-least-16-characters"
+}
 ```
+
+The Host creates an outbound relay connection and adds the relay fields to its QR code and pairing JSON. Do not expose the local Host port. See [Public Relay Connection](public-relay.en.md) for deployment details and security guidance.
 
 ## 8. Verification
 

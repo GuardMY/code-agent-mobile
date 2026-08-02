@@ -4,7 +4,10 @@ data class PairingPayload(
     val host: String,
     val port: Int,
     val pairingToken: String,
-    val deviceName: String
+    val deviceName: String,
+    val relayUrl: String? = null,
+    val hostId: String? = null,
+    val relayToken: String? = null
 )
 
 data class ConnectionInfo(
@@ -61,7 +64,10 @@ data class ApprovalRequest(
     val summary: String,
     val status: String,
     val createdAt: String,
-    val timeoutSeconds: Int?
+    val timeoutSeconds: Int? = null,
+    val details: String? = null,
+    val respondedBy: String? = null,
+    val respondedAt: String? = null
 )
 
 data class DeviceSummary(

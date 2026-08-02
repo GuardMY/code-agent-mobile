@@ -51,6 +51,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.agentmobile.app.model.ApprovalRequest
 import com.agentmobile.app.model.ConsoleLine
 import com.agentmobile.app.model.ConsoleLineRole
 import com.agentmobile.app.model.AgentCapabilitySummary
@@ -334,7 +335,9 @@ fun DashboardScreen(
     ) {
         AppHeader(
             title = "Agent Mobile",
-            subtitle = "已连接到 ${state.connection?.host}:${state.connection?.port}"
+            subtitle = state.connection?.relayUrl?.takeIf { it.isNotBlank() }
+                ?.let { "已通过公网中继连接" }
+                ?: "已连接到 ${state.connection?.host}:${state.connection?.port}"
         )
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -511,25 +514,13 @@ fun ConsoleScreen(
                 Text("停止")
             }
         }
-        state.approvals.forEach { approval ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = PanelShape,
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
-            ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("${approval.risk.uppercase()} ${approval.action}", fontWeight = FontWeight.SemiBold)
-                    Text(approval.summary, style = MaterialTheme.typography.bodyMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { onRespondApproval(approval.approvalId, "approve") }) {
-                            Text("批准")
-                        }
-                        OutlinedButton(onClick = { onRespondApproval(approval.approvalId, "deny") }) {
-                            Text("拒绝")
-                        }
-                    }
-                }
-            }
+        val visibleApprovals = state.approvals.filter { it.sessionId == selectedSessionId }
+        visibleApprovals.forEach { approval ->
+            ApprovalCard(
+                approval = approval,
+                responding = state.respondingApprovalIds.contains(approval.approvalId),
+                onRespondApproval = onRespondApproval
+            )
         }
         Card(
             modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -575,6 +566,83 @@ fun ConsoleScreen(
         }
     }
 }
+
+@Composable
+fun ApprovalCard(
+    approval: ApprovalRequest,
+    responding: Boolean,
+    onRespondApproval: (String, String) -> Unit
+) {
+    val riskColor = approvalRiskColor(approval.risk)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = PanelShape,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(approval.action, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text(
+                    approval.risk.uppercase(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = riskColor,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Text(approval.summary, style = MaterialTheme.typography.bodyMedium)
+            if (!approval.details.isNullOrBlank()) {
+                Text(
+                    approval.details,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            ApprovalMetaRow(approval)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { onRespondApproval(approval.approvalId, "approve") },
+                    enabled = !responding,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(if (responding) "处理中" else "批准")
+                }
+                OutlinedButton(
+                    onClick = { onRespondApproval(approval.approvalId, "deny") },
+                    enabled = !responding,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("拒绝")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ApprovalMetaRow(approval: ApprovalRequest) {
+    val timeoutText = approval.timeoutSeconds?.let { "超时 ${it} 秒" }
+    val respondedText = approval.respondedBy?.let { source ->
+        approval.respondedAt?.let { at -> "${source} 于 ${at} 响应" } ?: "${source} 已响应"
+    }
+    val meta = listOfNotNull(timeoutText, respondedText).joinToString(" · ")
+    if (meta.isNotBlank()) {
+        Text(
+            meta,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+fun approvalRiskColor(risk: String): Color = when (risk.lowercase()) {
+    "critical" -> Color(0xFF8E1B13)
+    "high" -> Color(0xFFB3261E)
+    "medium" -> Color(0xFF7A5600)
+    "low" -> Color(0xFF17663A)
+    else -> Color(0xFF4C5A60)
+}
+
 @Composable
 fun ConversationBubble(line: ConsoleLine) {
     val isUser = line.role == ConsoleLineRole.USER

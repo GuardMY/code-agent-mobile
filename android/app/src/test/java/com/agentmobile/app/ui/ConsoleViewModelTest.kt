@@ -66,6 +66,31 @@ class ConsoleViewModelTest {
     }
 
     @Test
+    fun connectPreservesRelayPairingFieldsThroughApiCompatibilityOverload() = runTest(dispatcher) {
+        val client = FakeAgentMobileApi(sessions = listOf(session("sess_1", "running", 5)))
+        val viewModel = ConsoleViewModel(client, dispatcher, reconnectDelayMs = 1)
+
+        viewModel.connect(
+            """
+            {
+              "host": "127.0.0.1",
+              "port": 17365,
+              "pairingToken": "pairing-token-123",
+              "deviceName": "VS Code",
+              "relayUrl": "wss://relay.example.com",
+              "hostId": "host_12345678",
+              "relayToken": "relay-token-123456"
+            }
+            """.trimIndent()
+        )
+        advanceUntilIdle()
+
+        assertEquals("wss://relay.example.com", viewModel.state.value.connection?.relayUrl)
+        assertEquals("host_12345678", viewModel.state.value.connection?.hostId)
+        assertEquals("relay-token-123456", viewModel.state.value.connection?.relayToken)
+    }
+
+    @Test
     fun connectReauthsAfter401AndRetriesStatus() = runTest(dispatcher) {
         val client = FakeAgentMobileApi(
             sessions = listOf(session("sess_new", "running", 9)),
@@ -277,6 +302,47 @@ class ConsoleViewModelTest {
     }
 
     @Test
+    fun relayRpcFramesDoNotResetPersistentStreamSequence() = runTest(dispatcher) {
+        val client = FakeAgentMobileApi(sessions = listOf(session("sess_1", "running", 5)))
+        val viewModel = ConsoleViewModel(client, dispatcher, reconnectDelayMs = 1)
+
+        viewModel.connect(pairingJson())
+        advanceUntilIdle()
+        client.listener!!.onMessage(
+            FakeWebSocket(),
+            """
+            {
+              "type": "relay.request",
+              "seq": 0,
+              "payload": {
+                "requestId": "request_1",
+                "method": "GET",
+                "path": "/status"
+              }
+            }
+            """.trimIndent()
+        )
+        client.listener!!.onMessage(
+            FakeWebSocket(),
+            """
+            {
+              "type": "relay.response",
+              "seq": 0,
+              "payload": {
+                "requestId": "request_1",
+                "status": 200,
+                "body": {}
+              }
+            }
+            """.trimIndent()
+        )
+
+        assertEquals(5L, viewModel.state.value.lastSeq)
+        assertTrue(viewModel.state.value.lines.isEmpty())
+        assertNull(viewModel.state.value.error)
+    }
+
+    @Test
     fun agentInputAddsUserLineFromStream() = runTest(dispatcher) {
         val client = FakeAgentMobileApi(sessions = listOf(session("sess_1", "running", 5)))
         val viewModel = ConsoleViewModel(client, dispatcher, reconnectDelayMs = 1)
@@ -412,6 +478,95 @@ class ConsoleViewModelTest {
         assertEquals(0, viewModel.state.value.approvals.size)
     }
 
+
+    @Test
+    fun connectLoadsPendingApprovalsFromHost() = runTest(dispatcher) {
+        val client = FakeAgentMobileApi(
+            sessions = listOf(session("sess_1", "running", 5)),
+            pendingApprovals = listOf(
+                approval("appr_1", sessionId = "sess_1", details = "npm install")
+            )
+        )
+        val viewModel = ConsoleViewModel(client, dispatcher, reconnectDelayMs = 1)
+
+        viewModel.connect(pairingJson())
+        advanceUntilIdle()
+
+        assertEquals("appr_1", viewModel.state.value.approvals.single().approvalId)
+        assertEquals("npm install", viewModel.state.value.approvals.single().details)
+    }
+
+    @Test
+    fun approvalRequiredParsesDetailsAndReplacesExistingApproval() = runTest(dispatcher) {
+        val client = FakeAgentMobileApi(sessions = listOf(session("sess_1", "running", 5)))
+        val viewModel = ConsoleViewModel(client, dispatcher, reconnectDelayMs = 1)
+
+        viewModel.connect(pairingJson())
+        advanceUntilIdle()
+        client.listener!!.onMessage(
+            FakeWebSocket(),
+            """
+            {
+              "type": "approval.required",
+              "seq": 6,
+              "payload": {
+                "approval": {
+                  "approvalId": "appr_1",
+                  "sessionId": "sess_1",
+                  "risk": "critical",
+                  "action": "Bash",
+                  "summary": "Run command",
+                  "details": "rm -rf build",
+                  "status": "pending",
+                  "createdAt": "2026-06-30T14:30:00.000Z",
+                  "timeoutSeconds": 30
+                }
+              }
+            }
+            """.trimIndent()
+        )
+
+        val approval = viewModel.state.value.approvals.single()
+        assertEquals("critical", approval.risk)
+        assertEquals("rm -rf build", approval.details)
+        assertEquals(30, approval.timeoutSeconds)
+    }
+
+    @Test
+    fun approvalExpiredRemovesPendingApproval() = runTest(dispatcher) {
+        val client = FakeAgentMobileApi(
+            sessions = listOf(session("sess_1", "running", 5)),
+            pendingApprovals = listOf(approval("appr_1", sessionId = "sess_1"))
+        )
+        val viewModel = ConsoleViewModel(client, dispatcher, reconnectDelayMs = 1)
+
+        viewModel.connect(pairingJson())
+        advanceUntilIdle()
+        client.listener!!.onMessage(
+            FakeWebSocket(),
+            """
+            {
+              "type": "approval.expired",
+              "seq": 6,
+              "payload": {
+                "approval": {
+                  "approvalId": "appr_1",
+                  "sessionId": "sess_1",
+                  "risk": "high",
+                  "action": "Bash",
+                  "summary": "Timed out",
+                  "status": "expired",
+                  "createdAt": "2026-06-30T14:30:00.000Z",
+                  "respondedBy": "timeout",
+                  "respondedAt": "2026-06-30T14:35:00.000Z"
+                }
+              }
+            }
+            """.trimIndent()
+        )
+
+        assertEquals(0, viewModel.state.value.approvals.size)
+    }
     private fun pairingJson(
         host: String = "127.0.0.1",
         port: Int = 17365
@@ -424,6 +579,24 @@ class ConsoleViewModelTest {
           "deviceName": "VS Code"
         }
         """.trimIndent()
+
+
+    private fun approval(
+        id: String,
+        sessionId: String,
+        details: String? = null
+    ): ApprovalRequest =
+        ApprovalRequest(
+            approvalId = id,
+            sessionId = sessionId,
+            risk = "high",
+            action = "Bash",
+            summary = "Run command",
+            status = "pending",
+            createdAt = "2026-06-30T14:30:00.000Z",
+            timeoutSeconds = 300,
+            details = details
+        )
 
     private fun unauthorizedResponse(): Response =
         Response.Builder()
@@ -451,7 +624,8 @@ private class FakeAgentMobileApi(
     var failSendOnceWith401: Boolean = false,
     var rotateCredentialsOnReauth: Boolean = false,
     sessionsByPair: List<List<SessionSummary>> = emptyList(),
-    pairResponses: List<ConnectionInfo> = emptyList()
+    pairResponses: List<ConnectionInfo> = emptyList(),
+    private val pendingApprovals: List<ApprovalRequest> = emptyList()
 ) : AgentMobileApi {
     private val pairQueue = ArrayDeque(pairResponses)
     private val sessionQueue = ArrayDeque(sessionsByPair)
@@ -523,7 +697,7 @@ private class FakeAgentMobileApi(
 
     override fun stopSession(connection: ConnectionInfo, sessionId: String) = Unit
 
-    override fun listApprovals(connection: ConnectionInfo): List<ApprovalRequest> = emptyList()
+    override fun listApprovals(connection: ConnectionInfo): List<ApprovalRequest> = pendingApprovals
 
     override fun respondApproval(connection: ConnectionInfo, approvalId: String, decision: String) {
         approvalDecision = decision

@@ -2,9 +2,9 @@ import { buildGatewayServer } from "./server.js";
 
 const host = readArg("--host") ?? process.env.AGENT_MOBILE_GATEWAY_HOST ?? "127.0.0.1";
 const port = Number(readArg("--port") ?? process.env.AGENT_MOBILE_GATEWAY_PORT ?? 17366);
-const relayToken = readArg("--relay-token") ?? process.env.AGENT_MOBILE_RELAY_TOKEN ?? "dev-relay-token";
+const relayToken = readArg("--relay-token") ?? process.env.AGENT_MOBILE_RELAY_TOKEN;
 
-const app = buildGatewayServer({ relayToken });
+const app = buildGatewayServer(relayToken ? { relayToken } : {});
 await app.listen({ host, port });
 
 console.log(

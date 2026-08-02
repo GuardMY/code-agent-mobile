@@ -41733,7 +41733,8 @@ ${body}`);
 // ../agent-host/src/cli.ts
 var cli_exports = {};
 __export(cli_exports, {
-  parseTrustedDevicesArgument: () => parseTrustedDevicesArgument
+  parseTrustedDevicesArgument: () => parseTrustedDevicesArgument,
+  resolveRelayOptions: () => resolveRelayOptions
 });
 module.exports = __toCommonJS(cli_exports);
 var import_node_url = require("node:url");
@@ -45800,7 +45801,9 @@ var messageTypeSchema = external_exports.enum([
   "error",
   "session.started",
   "session.finished",
-  "session.resume"
+  "session.resume",
+  "relay.request",
+  "relay.response"
 ]);
 var controlCommandSchema = external_exports.enum(["pause", "resume", "stop"]);
 var envelopeSchema = external_exports.object({
@@ -45816,7 +45819,37 @@ var pairingPayloadSchema = external_exports.object({
   host: external_exports.string().min(1),
   port: external_exports.number().int().min(1).max(65535),
   pairingToken: external_exports.string().min(8),
-  deviceName: external_exports.string().min(1)
+  deviceName: external_exports.string().min(1),
+  relayUrl: external_exports.string().url().refine((value) => {
+    try {
+      return new URL(value).protocol === "wss:";
+    } catch {
+      return false;
+    }
+  }, "relayUrl must use wss://").optional(),
+  hostId: external_exports.string().min(8).optional(),
+  relayToken: external_exports.string().min(16).optional()
+}).superRefine((value, ctx) => {
+  const relayFields = [value.relayUrl, value.hostId, value.relayToken];
+  if (relayFields.some(Boolean) && !relayFields.every(Boolean)) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      message: "relayUrl, hostId, and relayToken must be provided together"
+    });
+  }
+});
+var relayRequestSchema = external_exports.object({
+  requestId: external_exports.string().min(1),
+  method: external_exports.enum(["GET", "POST"]),
+  path: external_exports.string().startsWith("/"),
+  headers: external_exports.record(external_exports.string(), external_exports.string()).optional(),
+  body: external_exports.unknown().optional()
+});
+var relayResponseSchema = external_exports.object({
+  requestId: external_exports.string().min(1),
+  status: external_exports.number().int().min(100).max(599),
+  body: external_exports.unknown().optional(),
+  error: external_exports.string().min(1).optional()
 });
 var pairSuccessResponseSchema = external_exports.object({
   accessToken: external_exports.string().min(1),
@@ -46958,38 +46991,185 @@ function workspaceToProjectSlug2(workspace) {
 }
 
 // ../agent-host/src/relayClient.ts
+var RELAY_RECONNECT_DELAY_MS = 1e3;
 function startRelayClient(options) {
   const url = new URL("/host", options.relayUrl);
   url.searchParams.set("hostId", options.hostId);
   url.searchParams.set("token", options.relayToken);
-  const socket = new WebSocket(url);
-  socket.addEventListener("message", (event) => {
-    void handleRelayMessage(options.manager, String(event.data));
-  });
+  let activeSocket;
+  let reconnectTimer;
   options.manager.subscribe((event) => {
-    if (socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify(event));
+    if (activeSocket?.readyState === WebSocket.OPEN) {
+      activeSocket.send(JSON.stringify(event));
     }
   });
-  return socket;
+  const connect = () => {
+    const socket = new WebSocket(url);
+    activeSocket = socket;
+    const messageOptions = {
+      manager: options.manager,
+      localBaseUrl: options.localBaseUrl,
+      fetch: options.fetch,
+      allowLegacyCommands: false,
+      responder: (message) => {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify(message));
+        }
+      }
+    };
+    socket.addEventListener("message", (event) => {
+      void handleRelayMessage(messageOptions, String(event.data)).catch(() => void 0);
+    });
+    socket.addEventListener("close", () => {
+      if (activeSocket !== socket || reconnectTimer) {
+        return;
+      }
+      activeSocket = void 0;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = void 0;
+        connect();
+      }, RELAY_RECONNECT_DELAY_MS);
+    });
+    return socket;
+  };
+  return connect();
 }
-async function handleRelayMessage(manager, raw) {
+async function handleRelayMessage(managerOrOptions, raw) {
+  const options = toRelayMessageHandlerOptions(managerOrOptions);
   const message = envelopeSchema.parse(JSON.parse(raw));
+  if (message.type === "relay.request") {
+    await proxyRelayRequest(message.payload, options);
+    return;
+  }
+  if (!options.allowLegacyCommands) {
+    return;
+  }
   if (message.type === "agent.start") {
-    await manager.createSession();
+    await options.manager.createSession();
     return;
   }
   if (message.type === "agent.input" && message.sessionId) {
     const payload = message.payload;
     if (typeof payload.text === "string") {
-      await manager.sendInput(message.sessionId, payload.text);
+      await options.manager.sendInput(message.sessionId, payload.text);
     }
     return;
   }
   if (message.type === "agent.control.stop" && message.sessionId) {
-    await manager.stopSession(message.sessionId);
+    await options.manager.stopSession(message.sessionId);
+  }
+}
+async function proxyRelayRequest(payload, options) {
+  const parsedRequest = relayRequestSchema.safeParse(payload);
+  if (!parsedRequest.success) {
+    const requestId = readRequestId(payload);
+    if (requestId) {
+      await sendRelayResponse(options, {
+        requestId,
+        status: 400,
+        error: "Invalid relay request"
+      });
+    }
     return;
   }
+  const request = parsedRequest.data;
+  if (!options.localBaseUrl) {
+    await sendRelayResponse(options, {
+      requestId: request.requestId,
+      status: 503,
+      error: "Relay RPC is not configured"
+    });
+    return;
+  }
+  let target;
+  try {
+    target = new URL(request.path, options.localBaseUrl);
+  } catch {
+    await sendRelayResponse(options, {
+      requestId: request.requestId,
+      status: 400,
+      error: "Invalid relay path"
+    });
+    return;
+  }
+  const localBase = new URL(options.localBaseUrl);
+  if (target.origin !== localBase.origin || !isPublicAgentMobilePath(request.method, target.pathname)) {
+    await sendRelayResponse(options, {
+      requestId: request.requestId,
+      status: 403,
+      error: "Relay path is not allowed"
+    });
+    return;
+  }
+  try {
+    const response = await (options.fetch ?? globalThis.fetch)(target.toString(), {
+      method: request.method,
+      headers: relayHeaders(request.headers, request.body),
+      ...request.body === void 0 ? {} : { body: serializeRelayBody(request.body) }
+    });
+    const body = await readRelayResponseBody(response);
+    await sendRelayResponse(options, {
+      requestId: request.requestId,
+      status: response.status,
+      ...body === void 0 ? {} : { body }
+    });
+  } catch (error) {
+    await sendRelayResponse(options, {
+      requestId: request.requestId,
+      status: 502,
+      error: error instanceof Error ? error.message : "Relay request failed"
+    });
+  }
+}
+function toRelayMessageHandlerOptions(input) {
+  return "manager" in input ? input : { manager: input, allowLegacyCommands: true };
+}
+function readRequestId(payload) {
+  if (!payload || typeof payload !== "object") {
+    return void 0;
+  }
+  const requestId = payload.requestId;
+  return typeof requestId === "string" && requestId.length > 0 ? requestId : void 0;
+}
+function relayHeaders(headers, body) {
+  const authorization = Object.entries(headers ?? {}).find(([name]) => name.toLowerCase() === "authorization")?.[1];
+  return {
+    "x-agent-mobile-relay-request": "1",
+    ...authorization === void 0 ? {} : { authorization },
+    ...body === void 0 ? {} : { "content-type": "application/json" }
+  };
+}
+function serializeRelayBody(body) {
+  return typeof body === "string" ? body : JSON.stringify(body);
+}
+async function readRelayResponseBody(response) {
+  const text = await response.text();
+  if (!text) {
+    return void 0;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+async function sendRelayResponse(options, response) {
+  if (!options.responder) {
+    return;
+  }
+  await options.responder(
+    createEnvelope({
+      type: "relay.response",
+      deviceId: "agent-host",
+      payload: relayResponseSchema.parse(response)
+    })
+  );
+}
+function isPublicAgentMobilePath(method, pathname) {
+  if (method === "GET") {
+    return ["/health", "/status", "/sessions", "/events", "/approvals", "/devices"].includes(pathname);
+  }
+  return pathname === "/pair" || pathname === "/devices/reauth" || pathname === "/sessions" || /^\/devices\/[^/]+\/revoke$/.test(pathname) || /^\/approvals\/[^/]+\/respond$/.test(pathname) || /^\/sessions\/[^/]+\/(?:input|attach|control)$/.test(pathname);
 }
 
 // ../agent-host/src/server.ts
@@ -47431,7 +47611,7 @@ function buildServer(options) {
     if (request.url === "/health" || request.url === "/pair" || request.url === "/devices/reauth" || request.url.startsWith("/stream")) {
       return;
     }
-    if (request.url === "/status" && (request.headers["x-agent-mobile-pairing-token"] === options.pairingToken || isLoopbackRequest(request))) {
+    if (request.url === "/status" && (request.headers["x-agent-mobile-pairing-token"] === options.pairingToken || isLoopbackRequest(request) && request.headers["x-agent-mobile-relay-request"] !== "1")) {
       return;
     }
     if (request.url === "/host/control" && request.headers["x-agent-mobile-pairing-token"] === options.pairingToken) {
@@ -47466,7 +47646,12 @@ function buildServer(options) {
       host: options.advertisedHost ?? "127.0.0.1",
       port: options.port ?? 17365,
       pairingToken: options.pairingToken,
-      deviceName: options.deviceName
+      deviceName: options.deviceName,
+      ...options.relayUrl && options.hostId && options.relayToken ? {
+        relayUrl: options.relayUrl,
+        hostId: options.hostId,
+        relayToken: options.relayToken
+      } : {}
     };
     return {
       server: {
@@ -47701,6 +47886,7 @@ async function main() {
   const relayUrl = readArg("--relay-url") ?? process.env.AGENT_MOBILE_RELAY_URL;
   const relayHostId = readArg("--relay-host-id") ?? process.env.AGENT_MOBILE_RELAY_HOST_ID;
   const relayToken = readArg("--relay-token") ?? process.env.AGENT_MOBILE_RELAY_TOKEN;
+  const relay = resolveRelayOptions({ relayUrl, relayHostId, relayToken });
   const trustedDevices = parseTrustedDevicesArgument(readArg("--trusted-devices"));
   const advertisedHost = host === "0.0.0.0" ? firstLanAddress() ?? "127.0.0.1" : host;
   const adapters = [new CodexAdapter({ command: codexCommand, args: [] })];
@@ -47720,6 +47906,7 @@ async function main() {
     deviceName: "VS Code",
     advertisedHost,
     port,
+    ...relay ?? {},
     trustedDevices,
     stopHost: async () => {
       setTimeout(() => {
@@ -47727,10 +47914,14 @@ async function main() {
       }, 0);
     }
   });
-  if (relayUrl && relayHostId && relayToken) {
-    startRelayClient({ relayUrl, hostId: relayHostId, relayToken, manager });
-  }
   await app.listen({ host, port });
+  if (relay) {
+    startRelayClient({
+      ...relay,
+      manager,
+      localBaseUrl: `http://127.0.0.1:${port}`
+    });
+  }
   console.log(
     JSON.stringify({
       type: "agent-mobile.ready",
@@ -47750,6 +47941,32 @@ function parseTrustedDevicesArgument(value) {
   }
   return trustedDeviceRecordListSchema.parse(JSON.parse(value));
 }
+function resolveRelayOptions(input) {
+  const relayUrl = input.relayUrl?.trim();
+  const hostId = input.relayHostId?.trim();
+  const relayToken = input.relayToken?.trim();
+  if (!relayUrl && !hostId && !relayToken) {
+    return void 0;
+  }
+  if (!relayUrl || !hostId || !relayToken) {
+    throw new Error("--relay-url, --relay-host-id, and --relay-token must be configured together");
+  }
+  const url = new URL(relayUrl);
+  if (url.protocol !== "wss:") {
+    throw new Error("--relay-url must use wss:// for public connections");
+  }
+  if (hostId.length < 8) {
+    throw new Error("--relay-host-id must be at least 8 characters");
+  }
+  if (relayToken.length < 16) {
+    throw new Error("--relay-token must be at least 16 characters");
+  }
+  return {
+    relayUrl: url.toString().replace(/\/$/, ""),
+    hostId,
+    relayToken
+  };
+}
 function firstLanAddress() {
   for (const infos of Object.values((0, import_node_os3.networkInterfaces)())) {
     for (const info of infos ?? []) {
@@ -47766,7 +47983,8 @@ function isDirectExecution(moduleUrl, entryArg) {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
-  parseTrustedDevicesArgument
+  parseTrustedDevicesArgument,
+  resolveRelayOptions
 });
 /*! Bundled license information:
 

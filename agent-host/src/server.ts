@@ -42,6 +42,9 @@ export interface ServerOptions {
   deviceName: string;
   advertisedHost?: string;
   port?: number;
+  relayUrl?: string;
+  hostId?: string;
+  relayToken?: string;
   accessTokenTtlMs?: number;
   trustedDevices?: TrustedDeviceRecord[];
   stopHost?: () => Promise<void> | void;
@@ -95,7 +98,8 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     }
     if (
       request.url === "/status" &&
-      (request.headers["x-agent-mobile-pairing-token"] === options.pairingToken || isLoopbackRequest(request))
+      (request.headers["x-agent-mobile-pairing-token"] === options.pairingToken ||
+        (isLoopbackRequest(request) && request.headers["x-agent-mobile-relay-request"] !== "1"))
     ) {
       return;
     }
@@ -135,7 +139,14 @@ export function buildServer(options: ServerOptions): FastifyInstance {
       host: options.advertisedHost ?? "127.0.0.1",
       port: options.port ?? 17365,
       pairingToken: options.pairingToken,
-      deviceName: options.deviceName
+      deviceName: options.deviceName,
+      ...(options.relayUrl && options.hostId && options.relayToken
+        ? {
+            relayUrl: options.relayUrl,
+            hostId: options.hostId,
+            relayToken: options.relayToken
+          }
+        : {})
     };
     return {
       server: {

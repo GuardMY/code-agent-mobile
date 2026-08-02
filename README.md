@@ -8,17 +8,17 @@ Code Agent Mobile is a LAN-first control surface for coding agents. It links a V
 - `agent-host`: local HTTP and WebSocket host that manages pairing, sessions, and agent adapters.
 - `vscode-extension`: VS Code extension that starts the host and exposes pairing and control UI.
 - `android`: Android app for pairing, session browsing, streaming output, and remote input.
-- `gateway`: optional relay service for future non-LAN scenarios.
+- `gateway`: optional WebSocket relay for self-hosted public-network connections.
 - `docs`: architecture notes, local MVP setup, and component-level documentation.
 
 ## Current scope
 
-The current MVP focuses on local network pairing between the desktop and the Android app.
+The project is LAN-first: local pairing between the desktop and the Android app remains the default workflow.
 
 - The VS Code extension starts the local host.
 - The Android app pairs by QR code or pairing JSON.
 - Codex is the main integrated coding agent path today.
-- Remote relay support is planned, but not the primary workflow yet.
+- A self-hosted public relay is available for remote connections; see the [public relay guide](docs/public-relay.en.md) for setup.
 
 ## Prerequisites
 
@@ -73,6 +73,10 @@ From the `android` directory, build the debug APK:
 
 The APK is typically written to `android/app/build/outputs/apk/debug/`.
 
+## Public relay
+
+The optional Gateway routes WebSocket traffic between the Agent Host and Android app without exposing the Host directly to the internet. It supports a shared static relay token or a token bound to a specific `hostId`; follow the [component usage guide](docs/component-usage-guide.en.md) to start the relay and configure the Host and pairing payload.
+
 ## Development flow
 
 1. Open the repository in VS Code.
@@ -87,6 +91,7 @@ The APK is typically written to `android/app/build/outputs/apk/debug/`.
 - Local MVP setup: [docs/dev-local-mvp.md](docs/dev-local-mvp.md)
 - Architecture overview: [docs/agent-mobile-control-architecture.en.md](docs/agent-mobile-control-architecture.en.md)
 - Component usage guide: [docs/component-usage-guide.en.md](docs/component-usage-guide.en.md)
+- Public relay guide: [docs/public-relay.en.md](docs/public-relay.en.md)
 
 ## License
 

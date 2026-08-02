@@ -8,17 +8,17 @@ Code Agent Mobile 是一个以局域网优先的智能编码代理控制方案�
 - `agent-host`：本地 HTTP 与 WebSocket 主机服务，负责配对、会话管理和代理适配。
 - `vscode-extension`：用于启动 Host，并提供配对与控制界面的 VS Code 插件。
 - `android`：Android 客户端，用于配对、浏览会话、接收流式输出和远程输入。
-- `gateway`：面向后续非局域网场景的可选中继服务。
+- `gateway`：用于自建公网连接的可选 WebSocket 中继服务。
 - `docs`：架构说明、本地 MVP 搭建文档和组件级使用文档。
 
 ## 当前范围
 
-当前 MVP 主要聚焦桌面端与 Android 应用之间的局域网配对能力。
+项目采用局域网优先的方式，桌面端与 Android 应用之间的本地配对仍是默认工作流。
 
 - VS Code 插件负责启动本地主机服务。
 - Android 应用通过二维码或配对 JSON 完成连接。
 - 目前重点集成的编码代理路径是 Codex。
-- 远程中继能力在规划中，但还不是当前主流程。
+- 可通过自建公网中继实现远程连接；配置方式见[公网中继指南](docs/public-relay.zh-CN.md)。
 
 ## 前置要求
 
@@ -73,6 +73,10 @@ npm run package:extension
 
 APK 通常会输出到 `android/app/build/outputs/apk/debug/`。
 
+## 公网中继
+
+可选的 Gateway 在不直接将 Host 暴露到互联网的前提下，转发 Agent Host 与 Android 应用之间的 WebSocket 流量。它支持共享的静态中继 token，也支持绑定到特定 `hostId` 的通道 token；请按[组件使用指南](docs/component-usage-guide.zh-CN.md)启动中继并配置 Host 与配对数据。
+
 ## 开发流程
 
 1. 在 VS Code 中打开本仓库。
@@ -87,6 +91,7 @@ APK 通常会输出到 `android/app/build/outputs/apk/debug/`。
 - 本地 MVP 搭建说明：[docs/dev-local-mvp.zh-CN.md](docs/dev-local-mvp.zh-CN.md)
 - 架构总览：[docs/agent-mobile-control-architecture.md](docs/agent-mobile-control-architecture.md)
 - 组件使用指南：[docs/component-usage-guide.zh-CN.md](docs/component-usage-guide.zh-CN.md)
+- 公网中继指南：[docs/public-relay.zh-CN.md](docs/public-relay.zh-CN.md)
 
 ## 许可证
 

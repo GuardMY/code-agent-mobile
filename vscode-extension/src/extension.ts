@@ -1,7 +1,7 @@
 import * as qrcode from "qrcode";
 import * as vscode from "vscode";
 import type { HostDashboardStatus } from "@agent-mobile/protocol";
-import { readAgentMobileConfig } from "./config.js";
+import { readAgentMobileConfig, resolveRelayConfig, type RelayConfig } from "./config.js";
 import { DeviceRegistry, type TrustedDeviceRecord } from "./deviceRegistry.js";
 import { LocalHostSessionClient, type SessionConsoleEvent } from "./hostClient.js";
 import { fetchHostDashboardStatus, HostController, requestHostStop, type DashboardFetchResult } from "./hostController.js";
@@ -13,6 +13,7 @@ type ExtensionState = {
   pairingToken: string;
   host: string;
   port: number;
+  relay?: RelayConfig;
   pairingJson: string;
   selectedSessionId?: string;
   sessionEvents: SessionConsoleEvent[];
@@ -55,6 +56,7 @@ export function createInitialState(): {
   pairingToken: string;
   host: string;
   port: number;
+  relay?: RelayConfig;
   pairingJson: string;
   selectedSessionId?: string;
   sessionEvents: SessionConsoleEvent[];
@@ -66,6 +68,7 @@ export function createInitialState(): {
     pairingToken: createPairingToken(),
     host: "127.0.0.1",
     port: 17365,
+    relay: undefined,
     pairingJson: "{}",
     selectedSessionId: undefined,
     sessionEvents: [],
@@ -127,6 +130,7 @@ export async function startHost(
     pairingToken: string;
     host: string;
     port: number;
+    relay?: RelayConfig;
     pairingJson: string;
     selectedSessionId?: string;
     sessionEvents: SessionConsoleEvent[];
@@ -137,7 +141,9 @@ export async function startHost(
   deviceRegistry: Pick<DeviceRegistry, "load">
 ): Promise<void> {
   const config = readAgentMobileConfig(vscode.workspace.getConfiguration("agentMobile"));
+  const relay = resolveRelayConfig(config);
   state.port = config.port;
+  state.relay = relay;
   const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
   const trustedDevices = await deviceRegistry.load();
   state.pairingToken = createPairingToken();
@@ -146,7 +152,8 @@ export async function startHost(
       host: state.host,
       port: config.port,
       pairingToken: state.pairingToken,
-      deviceName: "VS Code"
+      deviceName: "VS Code",
+      relay
     })
   );
   state.selectedSessionId = undefined;
@@ -163,6 +170,7 @@ export async function startHost(
     workspace,
     pairingToken: state.pairingToken,
     config,
+    relay,
     trustedDevices,
     onOutput: (line) => console.log(`[agent-mobile-host] ${line}`)
   });
@@ -184,6 +192,7 @@ async function stopHost(
     pairingToken: string;
     host: string;
     port: number;
+    relay?: RelayConfig;
     pairingJson: string;
     selectedSessionId?: string;
     sessionEvents: SessionConsoleEvent[];
@@ -251,6 +260,7 @@ export function applyDashboardState(
     pairingToken: string;
     host: string;
     port: number;
+    relay?: RelayConfig;
     pairingJson: string;
   },
   dashboard: HostDashboardStatus
@@ -259,6 +269,13 @@ export function applyDashboardState(
   state.host = dashboard.pairing.pairingPayload.host;
   state.port = dashboard.pairing.pairingPayload.port;
   state.pairingToken = dashboard.pairing.pairingPayload.pairingToken;
+  state.relay = dashboard.pairing.pairingPayload.relayUrl
+    ? {
+        relayUrl: dashboard.pairing.pairingPayload.relayUrl,
+        hostId: dashboard.pairing.pairingPayload.hostId!,
+        relayToken: dashboard.pairing.pairingPayload.relayToken!
+      }
+    : undefined;
   state.pairingJson = JSON.stringify(dashboard.pairing.pairingPayload);
 }
 
@@ -319,10 +336,12 @@ function clearDashboardState(state: {
   pairingToken: string;
   host: string;
   port: number;
+  relay?: RelayConfig;
   pairingJson: string;
 }): void {
   state.lanEnabled = false;
   state.host = "127.0.0.1";
+  state.relay = undefined;
   state.pairingToken = createPairingToken();
   state.pairingJson = "{}";
 }
@@ -341,6 +360,7 @@ class PairingViewProvider implements vscode.WebviewViewProvider {
       pairingToken: string;
       host: string;
       port: number;
+      relay?: RelayConfig;
       pairingJson: string;
       selectedSessionId?: string;
       sessionEvents: SessionConsoleEvent[];

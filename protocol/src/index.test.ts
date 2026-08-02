@@ -10,6 +10,8 @@ import {
   hostDashboardStatusSchema,
   pairSuccessResponseSchema,
   pairingPayloadSchema,
+  relayRequestSchema,
+  relayResponseSchema,
   reauthRequestSchema,
   reauthResponseSchema,
   sessionSummarySchema,
@@ -58,6 +60,65 @@ describe("protocol schemas", () => {
     });
 
     expect(result.success).toBe(true);
+  });
+
+  it("accepts complete relay pairing details and keeps LAN fields", () => {
+    const result = pairingPayloadSchema.parse({
+      host: "127.0.0.1",
+      port: 17365,
+      pairingToken: "pairing-token-123",
+      deviceName: "devbox",
+      relayUrl: "wss://relay.example.com",
+      hostId: "host_12345678",
+      relayToken: "relay-token-123456"
+    });
+
+    expect(result.relayUrl).toBe("wss://relay.example.com");
+    expect(result.hostId).toBe("host_12345678");
+  });
+
+  it("rejects incomplete relay pairing details", () => {
+    const result = pairingPayloadSchema.safeParse({
+      host: "127.0.0.1",
+      port: 17365,
+      pairingToken: "pairing-token-123",
+      deviceName: "devbox",
+      relayUrl: "wss://relay.example.com"
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects cleartext relay pairing URLs", () => {
+    const result = pairingPayloadSchema.safeParse({
+      host: "127.0.0.1",
+      port: 17365,
+      pairingToken: "pairing-token-123",
+      deviceName: "devbox",
+      relayUrl: "ws://relay.example.com",
+      hostId: "host_12345678",
+      relayToken: "relay-token-123456"
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("validates relay request and response payloads", () => {
+    const request = relayRequestSchema.parse({
+      requestId: "request_1",
+      method: "POST",
+      path: "/sessions/sess_1/input",
+      headers: { authorization: "Bearer access_123" },
+      body: { text: "hello" }
+    });
+    const response = relayResponseSchema.parse({
+      requestId: "request_1",
+      status: 202,
+      body: { ok: true }
+    });
+
+    expect(request.method).toBe("POST");
+    expect(response.status).toBe(202);
   });
 
   it("accepts permanent device summaries without token expiry metadata", () => {

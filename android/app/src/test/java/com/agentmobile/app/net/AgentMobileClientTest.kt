@@ -1,13 +1,148 @@
 package com.agentmobile.app.net
 
+import com.agentmobile.app.model.PairingPayload
+import okhttp3.OkHttpClient
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.tls.HandshakeCertificates
+import okhttp3.tls.HeldCertificate
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.agentmobile.app.model.ConnectionInfo
 import org.json.JSONObject
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 
 class AgentMobileClientTest {
+    @Test
+    fun relayPairAuthorizedRequestAndStreamUseAppWebSocket() {
+        val certificate = HeldCertificate.Builder()
+            .addSubjectAlternativeName("localhost")
+            .addSubjectAlternativeName("127.0.0.1")
+            .build()
+        val serverCertificates = HandshakeCertificates.Builder()
+            .heldCertificate(certificate)
+            .build()
+        val clientCertificates = HandshakeCertificates.Builder()
+            .addTrustedCertificate(certificate.certificate)
+            .build()
+        val envelopes = LinkedBlockingQueue<JSONObject>()
+        val streamedEvents = CountDownLatch(2)
+
+        MockWebServer().use { server ->
+            server.useHttps(serverCertificates.sslSocketFactory(), false)
+            server.enqueue(relayResponse(envelopes) { request ->
+                JSONObject()
+                    .put("accessToken", "access_123")
+                    .put("deviceId", "android_installation")
+                    .put("deviceSecret", "secret_123")
+            })
+            server.enqueue(relayResponse(envelopes) {
+                JSONObject()
+                    .put("agents", org.json.JSONArray())
+                    .put("sessions", org.json.JSONArray())
+            })
+            server.enqueue(
+                MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
+                        webSocket.send(
+                            """{"type":"agent.output","seq":9,"payload":{"text":"relay event"}}"""
+                        )
+                    }
+
+                    override fun onMessage(webSocket: WebSocket, text: String) {
+                        val envelope = JSONObject(text)
+                        envelopes.offer(envelope)
+                        val request = envelope.getJSONObject("payload")
+                        webSocket.send(
+                            JSONObject()
+                                .put("type", "relay.response")
+                                .put(
+                                    "payload",
+                                    JSONObject()
+                                        .put("requestId", request.getString("requestId"))
+                                        .put("status", 200)
+                                        .put(
+                                            "body",
+                                            org.json.JSONArray().put(
+                                                JSONObject()
+                                                    .put("type", "agent.output")
+                                                    .put("seq", 8)
+                                                    .put("payload", JSONObject().put("text", "relay backlog"))
+                                            )
+                                        )
+                                )
+                                .toString()
+                        )
+                    }
+                })
+            )
+            server.start()
+            val http = OkHttpClient.Builder()
+                .sslSocketFactory(clientCertificates.sslSocketFactory(), clientCertificates.trustManager)
+                .build()
+            val client = AgentMobileClient(http)
+            val relayUrl = server.url("/").toString().replaceFirst("https://", "wss://")
+            val pairing = PairingPayload(
+                host = "127.0.0.1",
+                port = 17365,
+                pairingToken = "pairing-token-123",
+                deviceName = "VS Code",
+                relayUrl = relayUrl,
+                hostId = "host_12345678",
+                relayToken = "relay-token-123456"
+            )
+
+            val connection = client.pair(pairing, "android_installation")
+            val status = client.getStatus(connection)
+            val stream = client.openStream(connection, 7, object : WebSocketListener() {
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    if (text.contains("relay event") || text.contains("relay backlog")) {
+                        streamedEvents.countDown()
+                    }
+                }
+            })
+
+            val pairHandshake = requireNotNull(server.takeRequest(5, TimeUnit.SECONDS))
+            val statusHandshake = requireNotNull(server.takeRequest(5, TimeUnit.SECONDS))
+            val streamHandshake = requireNotNull(server.takeRequest(5, TimeUnit.SECONDS))
+            val pairEnvelope = requireNotNull(envelopes.poll(5, TimeUnit.SECONDS))
+            val statusEnvelope = requireNotNull(envelopes.poll(5, TimeUnit.SECONDS))
+
+            assertEquals("access_123", connection.accessToken)
+            assertEquals("secret_123", connection.deviceSecret)
+            assertTrue(status.agents.isEmpty())
+            assertTrue(status.sessions.isEmpty())
+            assertTrue(streamedEvents.await(5, TimeUnit.SECONDS))
+            listOf(pairHandshake, statusHandshake, streamHandshake).forEach { handshake ->
+                assertEquals("/app", handshake.requestUrl!!.encodedPath)
+                assertEquals("host_12345678", handshake.requestUrl!!.queryParameter("hostId"))
+                assertEquals("relay-token-123456", handshake.requestUrl!!.queryParameter("token"))
+            }
+            assertEquals("relay.request", pairEnvelope.getString("type"))
+            assertEquals("android_installation", pairEnvelope.getString("deviceId"))
+            val pairRequest = pairEnvelope.getJSONObject("payload")
+            assertEquals("POST", pairRequest.getString("method"))
+            assertEquals("/pair", pairRequest.getString("path"))
+            assertEquals("pairing-token-123", JSONObject(pairRequest.getString("body")).getString("pairingToken"))
+            val statusRequest = statusEnvelope.getJSONObject("payload")
+            assertEquals("GET", statusRequest.getString("method"))
+            assertEquals("/status", statusRequest.getString("path"))
+            assertEquals("Bearer access_123", statusRequest.getJSONObject("headers").getString("Authorization"))
+            val streamEnvelope = requireNotNull(envelopes.poll(5, TimeUnit.SECONDS))
+            val streamRequest = streamEnvelope.getJSONObject("payload")
+            assertEquals("GET", streamRequest.getString("method"))
+            assertEquals("/events?lastSeq=7", streamRequest.getString("path"))
+            assertEquals("Bearer access_123", streamRequest.getJSONObject("headers").getString("Authorization"))
+            stream.cancel()
+            http.dispatcher.executorService.shutdown()
+        }
+    }
+
     @Test
     fun pairCallsPairEndpointAndReturnsDeviceCredentials() {
         MockWebServer().use { server ->
@@ -232,9 +367,12 @@ class AgentMobileClientTest {
                         "risk": "high",
                         "action": "shell.execute",
                         "summary": "npm install",
+                        "details": "npm install --ignore-scripts",
                         "status": "pending",
                         "createdAt": "2026-06-30T14:30:00.000Z",
-                        "timeoutSeconds": 300
+                        "timeoutSeconds": 300,
+                        "respondedBy": "android",
+                        "respondedAt": "2026-06-30T14:31:00.000Z"
                       }
                     ]
                     """.trimIndent()
@@ -247,6 +385,9 @@ class AgentMobileClientTest {
 
             assertEquals("appr_1", approvals.single().approvalId)
             assertEquals("high", approvals.single().risk)
+            assertEquals("npm install --ignore-scripts", approvals.single().details)
+            assertEquals("android", approvals.single().respondedBy)
+            assertEquals("2026-06-30T14:31:00.000Z", approvals.single().respondedAt)
             assertEquals("/approvals", server.takeRequest().path)
         }
     }
@@ -289,4 +430,27 @@ class AgentMobileClientTest {
             assertEquals("android_1", devices.single().deviceId)
         }
     }
+
+    private fun relayResponse(
+        envelopes: LinkedBlockingQueue<JSONObject>,
+        responseBody: (JSONObject) -> JSONObject
+    ): MockResponse = MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+        override fun onMessage(webSocket: WebSocket, text: String) {
+            val envelope = JSONObject(text)
+            envelopes.offer(envelope)
+            val request = envelope.getJSONObject("payload")
+            webSocket.send(
+                JSONObject()
+                    .put("type", "relay.response")
+                    .put(
+                        "payload",
+                        JSONObject()
+                            .put("requestId", request.getString("requestId"))
+                            .put("status", 200)
+                            .put("body", responseBody(request))
+                    )
+                    .toString()
+            )
+        }
+    })
 }

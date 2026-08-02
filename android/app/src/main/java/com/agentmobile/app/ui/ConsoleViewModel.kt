@@ -9,6 +9,7 @@ import com.agentmobile.app.model.AgentCapabilitySummary
 import com.agentmobile.app.model.ConnectionInfo
 import com.agentmobile.app.model.ConsoleLine
 import com.agentmobile.app.model.ConsoleLineRole
+import com.agentmobile.app.model.HostDashboardStatus
 import com.agentmobile.app.model.PairingPayload
 import com.agentmobile.app.model.SessionSummary
 import com.agentmobile.app.net.AgentMobileApi
@@ -26,6 +27,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
+import java.util.UUID
 
 data class ConsoleUiState(
     val connection: ConnectionInfo? = null,
@@ -39,7 +41,8 @@ data class ConsoleUiState(
     val connected: Boolean = false,
     val showingSessionDetail: Boolean = false,
     val reauthing: Boolean = false,
-    val selectedTab: String = "codex"
+    val selectedTab: String = "codex",
+    val respondingApprovalIds: Set<String> = emptySet()
 )
 
 class ConsoleViewModel(
@@ -53,6 +56,7 @@ class ConsoleViewModel(
     private var socket: WebSocket? = null
     private var reconnectAttempts = 0
     private var appContext: Context? = null
+    private val fallbackDeviceId = "android_${UUID.randomUUID()}"
 
     /** Must be called from Activity before any persistence-dependent methods. */
     fun initStorage(context: Context) {
@@ -64,6 +68,11 @@ class ConsoleViewModel(
         val value: T
     )
 
+    private data class DashboardSnapshot(
+        val status: HostDashboardStatus,
+        val approvals: List<ApprovalRequest>
+    )
+
     fun tryReauth() {
         val ctx = appContext ?: return
         val persisted = DeviceRepository.load(ctx) ?: return
@@ -71,10 +80,11 @@ class ConsoleViewModel(
         viewModelScope.launch(ioDispatcher) {
             runCatching {
                 val refreshed = client.reauth(persisted)
-                withReauth(refreshed) { current -> client.getStatus(current) }
+                withReauth(refreshed) { current -> loadDashboardSnapshot(current) }
             }.onSuccess { result ->
                 val activeConnection = result.connection
-                val status = result.value
+                val snapshot = result.value
+                val status = snapshot.status
                 val lastSeq = status.sessions.maxOfOrNull { it.lastSeq } ?: 0
                 _state.update {
                     it.copy(
@@ -84,6 +94,8 @@ class ConsoleViewModel(
                         session = null,
                         showingSessionDetail = false,
                         lastSeq = lastSeq,
+                        approvals = snapshot.approvals,
+                        respondingApprovalIds = emptySet(),
                         connected = true,
                         reauthing = false,
                         error = null
@@ -101,11 +113,13 @@ class ConsoleViewModel(
         viewModelScope.launch(ioDispatcher) {
             runCatching {
                 val payload: PairingPayload = PairingParser.parse(pairingJson)
-                val connection = client.pair(payload.host, payload.port, payload.pairingToken, "android")
-                withReauth(connection) { current -> client.getStatus(current) }
+                val deviceId = appContext?.let(DeviceRepository::getOrCreateInstallationId) ?: fallbackDeviceId
+                val connection = client.pair(payload, deviceId)
+                withReauth(connection) { current -> loadDashboardSnapshot(current) }
             }.onSuccess { result ->
                 val activeConnection = result.connection
-                val status = result.value
+                val snapshot = result.value
+                val status = snapshot.status
                 appContext?.let { DeviceRepository.save(it, activeConnection) }
                 val lastSeq = status.sessions.maxOfOrNull { it.lastSeq } ?: 0
                 _state.update {
@@ -116,6 +130,8 @@ class ConsoleViewModel(
                         session = null,
                         showingSessionDetail = false,
                         lastSeq = lastSeq,
+                        approvals = snapshot.approvals,
+                        respondingApprovalIds = emptySet(),
                         connected = true,
                         error = null
                     )
@@ -126,6 +142,12 @@ class ConsoleViewModel(
             }
         }
     }
+
+    private fun loadDashboardSnapshot(connection: ConnectionInfo): DashboardSnapshot =
+        DashboardSnapshot(
+            status = client.getStatus(connection),
+            approvals = client.listApprovals(connection)
+        )
 
     fun selectSession(sessionId: String) {
         val connection = _state.value.connection ?: return
@@ -213,6 +235,9 @@ class ConsoleViewModel(
 
     fun respondApproval(approvalId: String, decision: String) {
         val connection = _state.value.connection ?: return
+        _state.update { state ->
+            state.copy(respondingApprovalIds = state.respondingApprovalIds + approvalId, error = null)
+        }
         viewModelScope.launch(ioDispatcher) {
             runCatching {
                 withReauth(connection) { current ->
@@ -221,10 +246,21 @@ class ConsoleViewModel(
             }
                 .onSuccess {
                     _state.update { state ->
-                        state.copy(approvals = state.approvals.filterNot { it.approvalId == approvalId }, error = null)
+                        state.copy(
+                            approvals = state.approvals.filterNot { it.approvalId == approvalId },
+                            respondingApprovalIds = state.respondingApprovalIds - approvalId,
+                            error = null
+                        )
                     }
                 }
-                .onFailure { error -> _state.update { it.copy(error = error.message) } }
+                .onFailure { error ->
+                    _state.update { state ->
+                        state.copy(
+                            respondingApprovalIds = state.respondingApprovalIds - approvalId,
+                            error = error.message
+                        )
+                    }
+                }
         }
     }
 
@@ -232,10 +268,13 @@ class ConsoleViewModel(
         socket?.cancel()
         socket = client.openStream(connection, _state.value.lastSeq, object : WebSocketListener() {
             override fun onMessage(webSocket: WebSocket, text: String) {
+                val event = runCatching { JSONObject(text) }.getOrNull() ?: return
+                val type = event.optString("type")
+                if (type == "relay.request" || type == "relay.response") {
+                    return
+                }
                 reconnectAttempts = 0
-                val event = JSONObject(text)
                 val seq = event.getLong("seq")
-                val type = event.getString("type")
                 if (type == "agent.output" || type == "agent.input") {
                     val output = event.getJSONObject("payload").getString("text")
                     val sessionId = event.optString("sessionId").ifBlank { null }
@@ -282,17 +321,20 @@ class ConsoleViewModel(
                         it.copy(
                             lastSeq = seq,
                             connected = true,
-                            approvals = (it.approvals.filterNot { existing -> existing.approvalId == approval.approvalId } + approval),
+                            approvals = (it.approvals.filterNot { existing -> existing.approvalId == approval.approvalId } + approval)
+                                .filter { pending -> pending.status == "pending" },
+                            respondingApprovalIds = it.respondingApprovalIds - approval.approvalId,
                             error = null
                         )
                     }
-                } else if (type == "approval.approve" || type == "approval.deny") {
+                } else if (type == "approval.approve" || type == "approval.deny" || type == "approval.expired") {
                     val approval = parseApproval(event.getJSONObject("payload").getJSONObject("approval"))
                     _state.update {
                         it.copy(
                             lastSeq = seq,
                             connected = true,
                             approvals = it.approvals.filterNot { existing -> existing.approvalId == approval.approvalId },
+                            respondingApprovalIds = it.respondingApprovalIds - approval.approvalId,
                             error = null
                         )
                     }
@@ -392,6 +434,9 @@ class ConsoleViewModel(
             summary = item.getString("summary"),
             status = item.getString("status"),
             createdAt = item.getString("createdAt"),
-            timeoutSeconds = if (item.has("timeoutSeconds")) item.getInt("timeoutSeconds") else null
+            timeoutSeconds = if (item.has("timeoutSeconds")) item.getInt("timeoutSeconds") else null,
+            details = item.optString("details").ifBlank { null },
+            respondedBy = item.optString("respondedBy").ifBlank { null },
+            respondedAt = item.optString("respondedAt").ifBlank { null }
         )
 }

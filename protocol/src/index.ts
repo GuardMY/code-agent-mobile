@@ -18,7 +18,9 @@ export const messageTypeSchema = z.enum([
   "error",
   "session.started",
   "session.finished",
-  "session.resume"
+  "session.resume",
+  "relay.request",
+  "relay.response"
 ]);
 
 export const controlCommandSchema = z.enum(["pause", "resume", "stop"]);
@@ -37,13 +39,53 @@ export type Envelope<TPayload = unknown> = Omit<z.infer<typeof envelopeSchema>, 
   payload: TPayload;
 };
 
-export const pairingPayloadSchema = z.object({
-  host: z.string().min(1),
-  port: z.number().int().min(1).max(65535),
-  pairingToken: z.string().min(8),
-  deviceName: z.string().min(1)
-});
+export const pairingPayloadSchema = z
+  .object({
+    host: z.string().min(1),
+    port: z.number().int().min(1).max(65535),
+    pairingToken: z.string().min(8),
+    deviceName: z.string().min(1),
+    relayUrl: z
+      .string()
+      .url()
+      .refine((value) => {
+        try {
+          return new URL(value).protocol === "wss:";
+        } catch {
+          return false;
+        }
+      }, "relayUrl must use wss://")
+      .optional(),
+    hostId: z.string().min(8).optional(),
+    relayToken: z.string().min(16).optional()
+  })
+  .superRefine((value, ctx) => {
+    const relayFields = [value.relayUrl, value.hostId, value.relayToken];
+    if (relayFields.some(Boolean) && !relayFields.every(Boolean)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "relayUrl, hostId, and relayToken must be provided together"
+      });
+    }
+  });
 export type PairingPayload = z.infer<typeof pairingPayloadSchema>;
+
+export const relayRequestSchema = z.object({
+  requestId: z.string().min(1),
+  method: z.enum(["GET", "POST"]),
+  path: z.string().startsWith("/"),
+  headers: z.record(z.string(), z.string()).optional(),
+  body: z.unknown().optional()
+});
+export type RelayRequest = z.infer<typeof relayRequestSchema>;
+
+export const relayResponseSchema = z.object({
+  requestId: z.string().min(1),
+  status: z.number().int().min(100).max(599),
+  body: z.unknown().optional(),
+  error: z.string().min(1).optional()
+});
+export type RelayResponse = z.infer<typeof relayResponseSchema>;
 
 export const pairSuccessResponseSchema = z.object({
   accessToken: z.string().min(1),

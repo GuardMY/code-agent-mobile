@@ -6,6 +6,9 @@ export interface PairingPayload {
   port: number;
   pairingToken: string;
   deviceName: string;
+  relayUrl?: string;
+  hostId?: string;
+  relayToken?: string;
 }
 
 export function createPairingToken(): string {
@@ -17,12 +20,14 @@ export function createPairingPayload(input: {
   port: number;
   pairingToken: string;
   deviceName: string;
+  relay?: { relayUrl: string; hostId: string; relayToken: string };
 }): PairingPayload {
   return {
     host: input.host,
     port: input.port,
     pairingToken: input.pairingToken,
-    deviceName: input.deviceName
+    deviceName: input.deviceName,
+    ...(input.relay ?? {})
   };
 }
 

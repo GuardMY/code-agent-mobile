@@ -95,7 +95,7 @@ npm run package:extension
 安装生成的 VSIX：
 
 ```powershell
-code --install-extension vscode-extension/agent-mobile-control-0.1.0.vsix
+code --install-extension vscode-extension/agent-mobile-control-0.2.0.vsix
 ```
 
 ## 6. Android App
@@ -111,23 +111,27 @@ cd android
 
 ## 7. Gateway / Relay
 
-运行中继：
+可选的 Gateway 可在不暴露 Agent Host HTTP 端口的前提下，让 Android 通过公网访问。请将它部署在 TLS 反向代理之后，并将 `/host` 和 `/app` 的 WebSocket Upgrade 转发给 Gateway。Android 配对只接受具有有效证书的 `wss://` 端点。
+
+使用按主机绑定的通道 token 运行 Gateway：
 
 ```powershell
-npm run dev:gateway -- --host 127.0.0.1 --port 17366 --relay-token dev-relay-token
+npm run dev:gateway -- --host 0.0.0.0 --port 17366
 ```
 
-用中继参数启动 Host：
+或者传入 `--relay-token <唯一密钥>`，为所有通道使用同一个静态 token。默认模式会将第一个 Host 的 token 绑定到其 `hostId`。
 
-```powershell
-npm run dev:host -- `
-  --host 127.0.0.1 `
-  --port 17365 `
-  --workspace E:\Code\code-agent-mobile `
-  --relay-url ws://127.0.0.1:17366 `
-  --relay-host-id dev-host-1 `
-  --relay-token dev-relay-token
+启动 Host 前，请在 VS Code 插件中配置唯一的主机 ID 和 token：
+
+```json
+{
+  "agentMobile.relayUrl": "wss://relay.example.com",
+  "agentMobile.relayHostId": "host_8c02d1f5b2c84a58",
+  "agentMobile.relayToken": "replace-with-a-unique-secret-at-least-16-characters"
+}
 ```
+
+Host 会建立出站中继连接，并将中继字段写入二维码和配对 JSON。请不要暴露本地 Host 端口。部署细节和安全注意事项见[公网中继连接](public-relay.zh-CN.md)。
 
 ## 8. 验证
 

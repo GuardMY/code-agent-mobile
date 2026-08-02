@@ -1,8 +1,8 @@
 {
   "name": "agent-mobile-control",
   "displayName": "Agent Mobile 控制",
-  "description": "通过局域网中的 Android 设备控制本地 Codex 会话。",
-  "version": "0.1.0",
+  "description": "让 Android 设备通过局域网或公网中继控制本地 Codex 会话。",
+  "version": "0.2.0",
   "publisher": "agent-mobile",
   "type": "module",
   "main": "./dist/extension.cjs",
@@ -53,6 +53,21 @@
         "agentMobile.eventCacheSize": {
           "type": "number",
           "default": 500
+        },
+        "agentMobile.relayUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Public WSS relay URL. Set relayHostId and relayToken with this setting."
+        },
+        "agentMobile.relayHostId": {
+          "type": "string",
+          "default": "",
+          "description": "Opaque public relay channel ID for this desktop host."
+        },
+        "agentMobile.relayToken": {
+          "type": "string",
+          "default": "",
+          "description": "Public relay channel token. Use a unique value of at least 16 characters."
         }
       }
     }
